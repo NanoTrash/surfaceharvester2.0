@@ -26,6 +26,7 @@ def select_scanner():
     print("4. Subfinder")
     print("5. Nikto")
     print("6. Nuclei")
+    print("7. Все сканеры")
     print("0. Выход")
     return input("> ")
 
@@ -120,6 +121,116 @@ def main():
             parse_and_import_nuclei(data, cursor)
             conn.commit()
             print("Результаты Nuclei сохранены в базу.")
+        elif choice == '7':
+            print("[Все сканеры] Запуск всех сканеров для одной цели...")
+            target = prompt("Введите цель (домен или IP)", "example.com или 192.168.1.1")
+            dir_wordlist = prompt("Путь к словарю для Gobuster Dir", "/usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt")
+            fuzz_wordlist = prompt("Путь к словарю для Gobuster Fuzz", "/usr/share/wordlists/fuzz.txt")
+
+            # 1. Nmap
+            nmap_result = run_nmap_scan(target)
+            import re
+            matches = re.findall(r'(?P<port>\d+)/tcp\s+open\s+(?P<service>\w+)', nmap_result)
+            norm_vulns = []
+            for port, service in matches:
+                norm = {
+                    'ip': target,
+                    'port': int(port),
+                    'service': service,
+                    'cve': None,
+                    'severity': None,
+                    'scanner': 'nmap'
+                }
+                norm_vulns.append(norm)
+            if norm_vulns:
+                universal_import_to_db(norm_vulns, cursor)
+                conn.commit()
+                print(f"{len(norm_vulns)} сервисов Nmap сохранено в базу.")
+            else:
+                print(nmap_result)
+
+            # 2. Gobuster Dir
+            gobuster_dir_result = run_gobuster_dir(target, dir_wordlist)
+            norm_vulns = []
+            for line in gobuster_dir_result.splitlines():
+                if line.startswith('/'):
+                    norm = {
+                        'ip': target,
+                        'port': None,
+                        'service': 'http',
+                        'cve': None,
+                        'severity': None,
+                        'scanner': 'gobuster',
+                        'dir': line.strip()
+                    }
+                    norm_vulns.append(norm)
+            if norm_vulns:
+                universal_import_to_db(norm_vulns, cursor)
+                conn.commit()
+                print(f"{len(norm_vulns)} директорий Gobuster сохранено в базу.")
+            else:
+                print(gobuster_dir_result)
+
+            # 3. Gobuster Fuzz (ищем потенциальные точки для фаззинга)
+            fuzz_results = []
+            for line in gobuster_dir_result.splitlines():
+                if '?' in line and '=' in line:
+                    path = line.split()[0] if line.split() else line
+                    if '=' in path:
+                        param_path = path.split('=')[0] + '=FUZZ'
+                        base_url = target if target.startswith('http') else f'http://{target}'
+                        fuzz_url = base_url.rstrip('/') + param_path
+                        fuzz_output = run_gobuster_fuzz(fuzz_url, fuzz_wordlist)
+                        fuzz_results.append({'url': fuzz_url, 'result': fuzz_output, 'wordlist': fuzz_wordlist})
+            for fuzz in fuzz_results:
+                print(f"[Gobuster Fuzz] {fuzz['url']} (словарь: {fuzz['wordlist']})\n{fuzz['result']}")
+
+            # 4. Subfinder
+            subfinder_result = run_subfinder(target)
+            norm_vulns = []
+            for sub in subfinder_result:
+                norm = {
+                    'ip': sub,
+                    'port': 80,
+                    'service': 'http',
+                    'cve': None,
+                    'severity': None,
+                    'scanner': 'subfinder'
+                }
+                norm_vulns.append(norm)
+            if norm_vulns:
+                universal_import_to_db(norm_vulns, cursor)
+                conn.commit()
+                print(f"{len(norm_vulns)} субдоменов Subfinder сохранено в базу.")
+            else:
+                print(subfinder_result)
+
+            # 5. Nikto
+            from scanner.nikto import run_nikto, parse_and_import_nikto
+            nikto_data = run_nikto(target)
+            parse_and_import_nikto(nikto_data, cursor)
+            conn.commit()
+            print("Результаты Nikto сохранены в базу.")
+
+            # 6. Nuclei
+            from scanner.nuclei import run_nuclei, parse_and_import_nuclei
+            nuclei_data = run_nuclei(target)
+            parse_and_import_nuclei(nuclei_data, cursor)
+            conn.commit()
+            print("Результаты Nuclei сохранены в базу.")
+
+            # 7. Wappalyzer
+            from scanner.wappalyzer import run_wappalyzer, process_wappalyzer_result
+            wappalyzer_data = run_wappalyzer(target)
+            from scanner.parser import extract_host_and_url
+            host_id, url_id = extract_host_and_url(target, cursor)
+            process_wappalyzer_result(wappalyzer_data, cursor, host_id)
+            conn.commit()
+            print("Результаты Wappalyzer сохранены в базу.")
+
+            # Итоговый отчет
+            from db.report import show_report
+            show_report(cursor, target.replace("https://", "").replace("http://", ""))
         elif choice == '0':
             print("Выход.")
             break
