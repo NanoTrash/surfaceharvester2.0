@@ -1,0 +1,16 @@
+{
+    "$schema": "https://context7.com/schema/context7.json",
+    "projectTitle": "SurfaceHarvester",
+    "description": "Автоматизированный сбор информации о поверхности (сканирование портов, директорий, субдоменов, контактов).",
+    "excludeFolders": [],
+    "excludeFiles": [
+      "surfaceharvester.log",
+      "scan_results.txt"
+    ],
+    "rules": [
+      "Использовать только актуальные версии инструментов nmap, gobuster, requests, BeautifulSoup.",
+      "Не хранить чувствительные данные в коде.",
+      "Результаты сканирования сохранять в отдельный файл.",
+      "Обрабатывать ошибки всех внешних вызовов."
+    ]
+  }

@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "surfaceharvester"
+version = "0.1.0"
+description = "Автоматизированный сбор информации о поверхности (сканирование портов, директорий, субдоменов, контактов)."
+authors = ["Ваше Имя <your@email.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+aiohttp = "^3.8"
+beautifulsoup4 = "^4.12"
+lxml = "^4.9"
+requests = "^2.31"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
