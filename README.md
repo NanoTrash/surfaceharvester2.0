@@ -136,3 +136,24 @@ CREATE TABLE IF NOT EXISTS ScanResult (
 ## Контакты и поддержка
 
 - Вопросы и предложения — через Issues на GitHub.
+
+## Настройка базы данных
+
+- Используется SQLite, файл базы по умолчанию: scan_results.db (или scanner.db для main.py).
+- Все необходимые таблицы создаются автоматически при первом запуске CLI или main.py — ручная настройка не требуется.
+- Если база была удалена, просто перезапустите CLI, таблицы создадутся заново.
+- Для ручной инициализации (например, если хотите убедиться, что структура создана):
+
+```python
+from db.schema import setup_database
+import sqlite3
+conn = sqlite3.connect('scan_results.db')
+cursor = conn.cursor()
+setup_database(cursor)
+conn.commit()
+conn.close()
+```
+
+**Важно:**
+- Не перемещайте и не удаляйте файл базы данных без необходимости.
+- Для резервного копирования достаточно скопировать файл scan_results.db.

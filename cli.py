@@ -33,6 +33,9 @@ def select_scanner():
 def main():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    from db.schema import setup_database
+    setup_database(cursor)
+    conn.commit()
     while True:
         choice = select_scanner()
         if choice == '1':
