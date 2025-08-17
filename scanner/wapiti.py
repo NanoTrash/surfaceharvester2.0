@@ -138,32 +138,42 @@ def run_wapiti(target, temp_dir=None):
         logger.error(f"Ошибка при запуске Wapiti: {e}")
         return None
 
-def process_wapiti_result(data, cursor, session_id):
+def process_wapiti_result(data, cursor, session_id, target_resource=None):
     """
-    Обрабатывает результат Wapiti и сохраняет в базу данных
+    Обрабатывает результат Wapiti и сохраняет в базу данных через VulnerabilityManager
     """
     if not data:
         logger.warning("Нет данных Wapiti для обработки")
         return
     
     try:
-        # Сохраняем в базу данных
-        from db.models import Vulnerability
-        for finding in data:
-            if isinstance(finding, dict):
-                Vulnerability.insert(
-                    cursor,
-                    resource=finding.get('resource', 'Unknown'),
-                    vulnerability_type=finding.get('vulnerability_type', 'Wapiti Finding'),
-                    description=finding.get('description', ''),
-                    severity=finding.get('severity', 'Medium'),
-                    scanner=finding.get('scanner', 'wapiti')
-                )
+        from db.vulnerability_manager import VulnerabilityManager
         
-        logger.info(f"Обработано {len(data)} уязвимостей Wapiti")
+        # Создаем менеджер уязвимостей
+        vuln_manager = VulnerabilityManager()
+        
+        # Дополняем данные для AI парсера
+        enhanced_data = {
+            'vulnerabilities': data,
+            'scanner': 'wapiti',
+            'target': target_resource
+        }
+        
+        # Обрабатываем и сохраняем данные
+        stats = vuln_manager.process_and_save_vulnerabilities(
+            raw_data=enhanced_data,
+            scanner_name='wapiti',
+            cursor=cursor,
+            session_id=session_id,
+            target_resource=target_resource
+        )
+        
+        logger.info(f"Wapiti: обработано {stats.processed}, сохранено {stats.saved_new}, пропущено дубликатов {stats.duplicates_skipped}")
+        return stats
         
     except Exception as e:
         logger.error(f"Ошибка обработки результатов Wapiti: {e}")
+        return None
 
 def parse_and_import_wapiti(data, cursor):
     """

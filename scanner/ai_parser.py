@@ -243,6 +243,12 @@ class AIVulnerabilityParser:
                 vulnerabilities = self._parse_nuclei_output(scanner_output)
             elif scanner_name == 'nikto':
                 vulnerabilities = self._parse_nikto_output(scanner_output)
+            elif scanner_name == 'wapiti':
+                vulnerabilities = self._parse_wapiti_output(scanner_output)
+            elif scanner_name == 'nmap':
+                vulnerabilities = self._parse_nmap_output(scanner_output)
+            elif scanner_name == 'gobuster':
+                vulnerabilities = self._parse_gobuster_output(scanner_output)
             else:
                 vulnerabilities = self._parse_generic_output(scanner_output, scanner_name)
         except Exception as e:
@@ -328,6 +334,144 @@ class AIVulnerabilityParser:
                 except Exception as e:
                     logger.warning(f"Ошибка обработки Nikto vulnerability: {e}")
                     continue
+        
+        return vulnerabilities
+    
+    def _parse_wapiti_output(self, output: Dict) -> List[Dict]:
+        """
+        Парсит вывод Wapiti
+        """
+        vulnerabilities = []
+        
+        try:
+            # Получаем список уязвимостей из структуры
+            vuln_list = []
+            if isinstance(output, dict):
+                vuln_list = output.get('vulnerabilities', [])
+                target = output.get('target', 'Unknown')
+            else:
+                vuln_list = output if isinstance(output, list) else []
+                target = 'Unknown'
+            
+            for vuln in vuln_list:
+                if isinstance(vuln, dict):
+                    # Извлекаем информацию
+                    resource = vuln.get('resource', target)
+                    description = vuln.get('description', '')
+                    severity = vuln.get('severity', 'Medium')
+                    
+                    # Определяем тип уязвимости
+                    vuln_type = self.extract_vulnerability_type(description)
+                    
+                    vulnerabilities.append({
+                        'resource': resource,
+                        'vulnerability_type': vuln_type,
+                        'description': description,
+                        'severity': severity,
+                        'scanner': 'wapiti'
+                    })
+                    
+        except Exception as e:
+            logger.error(f"Ошибка парсинга Wapiti: {e}")
+        
+        return vulnerabilities
+    
+    def _parse_nmap_output(self, output: Dict) -> List[Dict]:
+        """
+        Парсит вывод Nmap
+        """
+        vulnerabilities = []
+        
+        try:
+            nmap_text = output.get('output', '') if isinstance(output, dict) else str(output)
+            target = output.get('target', 'Unknown') if isinstance(output, dict) else 'Unknown'
+            
+            lines = nmap_text.split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                
+                # Ищем CVE и уязвимости
+                if any(pattern in line.lower() for pattern in ['cve-', 'vulnerable', 'exploit', 'vulners']):
+                    # Извлекаем CVE ID
+                    cve_match = re.search(r'CVE-\d{4}-\d+', line)
+                    if cve_match:
+                        cve_id = cve_match.group(0)
+                        vuln_type = f"CVE: {cve_id}"
+                    else:
+                        vuln_type = self.extract_vulnerability_type(line) or "Nmap Vulnerability"
+                    
+                    # Извлекаем CVSS score для определения критичности
+                    cvss_match = re.search(r'(\d+\.\d+)', line)
+                    if cvss_match:
+                        cvss_score = float(cvss_match.group(1))
+                        if cvss_score >= 9.0:
+                            severity = "Critical"
+                        elif cvss_score >= 7.0:
+                            severity = "High"
+                        elif cvss_score >= 4.0:
+                            severity = "Medium"
+                        else:
+                            severity = "Low"
+                    else:
+                        severity = self.extract_severity(line)
+                    
+                    vulnerabilities.append({
+                        'resource': target,
+                        'vulnerability_type': vuln_type,
+                        'description': line[:500],  # Ограничиваем длину
+                        'severity': severity,
+                        'scanner': 'nmap'
+                    })
+                    
+        except Exception as e:
+            logger.error(f"Ошибка парсинга Nmap: {e}")
+        
+        return vulnerabilities
+    
+    def _parse_gobuster_output(self, output: Dict) -> List[Dict]:
+        """
+        Парсит вывод Gobuster
+        """
+        vulnerabilities = []
+        
+        try:
+            gobuster_text = output.get('output', '') if isinstance(output, dict) else str(output)
+            target = output.get('target', 'Unknown') if isinstance(output, dict) else 'Unknown'
+            
+            lines = gobuster_text.split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                
+                # Ищем найденные пути с интересными статусами
+                if any(status in line for status in ['Status: 200', 'Status: 301', 'Status: 302', 'Status: 403']):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        path = parts[0]
+                        status_info = ' '.join(parts[1:])
+                        
+                        # Определяем критичность на основе статуса и пути
+                        if 'admin' in path.lower() or 'config' in path.lower() or 'backup' in path.lower():
+                            severity = "Medium"
+                            vuln_type = "Sensitive Directory Found"
+                        elif '403' in status_info:
+                            severity = "Low"
+                            vuln_type = "Protected Directory Found"
+                        else:
+                            severity = "Info"
+                            vuln_type = "Directory/File Found"
+                        
+                        vulnerabilities.append({
+                            'resource': f"{target.rstrip('/')}/{path.lstrip('/')}",
+                            'vulnerability_type': vuln_type,
+                            'description': f"Found: {path} ({status_info})",
+                            'severity': severity,
+                            'scanner': 'gobuster'
+                        })
+                        
+        except Exception as e:
+            logger.error(f"Ошибка парсинга Gobuster: {e}")
         
         return vulnerabilities
 

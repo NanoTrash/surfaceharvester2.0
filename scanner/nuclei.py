@@ -81,47 +81,35 @@ def run_nuclei(target):
         logger.error(f"[Nuclei error for {target}]: {e}")
         return None
 
-def process_nuclei_result(data, cursor, session_id):
+def process_nuclei_result(data, cursor, session_id, target_resource=None):
     """
-    Обрабатывает результаты Nuclei и сохраняет в базу данных
+    Обрабатывает результаты Nuclei и сохраняет в базу данных через VulnerabilityManager
     """
     if not data:
         logger.warning("Нет данных Nuclei для обработки")
         return
     
     try:
-        from scanner.ai_parser import AIVulnerabilityParser
-        parser = AIVulnerabilityParser()
+        from db.vulnerability_manager import VulnerabilityManager
         
-        # Преобразуем данные Nuclei в стандартный формат
-        vulnerabilities = []
-        for finding in data:
-            if isinstance(finding, dict):
-                vuln = {
-                    'resource': finding.get('host', 'Unknown'),
-                    'vulnerability_type': finding.get('info', {}).get('name', 'Nuclei Finding'),
-                    'description': finding.get('info', {}).get('description', ''),
-                    'severity': finding.get('info', {}).get('severity', 'Medium'),
-                    'scanner': 'nuclei'
-                }
-                vulnerabilities.append(vuln)
+        # Создаем менеджер уязвимостей
+        vuln_manager = VulnerabilityManager()
         
-        # Сохраняем в базу данных
-        from db.models import Vulnerability
-        for vuln in vulnerabilities:
-            Vulnerability.insert(
-                cursor,
-                resource=vuln['resource'],
-                vulnerability_type=vuln['vulnerability_type'],
-                description=vuln['description'],
-                severity=vuln['severity'],
-                scanner=vuln['scanner']
-            )
+        # Обрабатываем и сохраняем данные
+        stats = vuln_manager.process_and_save_vulnerabilities(
+            raw_data=data,
+            scanner_name='nuclei',
+            cursor=cursor,
+            session_id=session_id,
+            target_resource=target_resource
+        )
         
-        logger.info(f"Обработано {len(vulnerabilities)} уязвимостей Nuclei")
+        logger.info(f"Nuclei: обработано {stats.processed}, сохранено {stats.saved_new}, пропущено дубликатов {stats.duplicates_skipped}")
+        return stats
         
     except Exception as e:
         logger.error(f"Ошибка обработки результатов Nuclei: {e}")
+        return None
 
 def parse_and_import_nuclei(data, cursor):
     """

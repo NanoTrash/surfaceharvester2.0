@@ -78,14 +78,14 @@ def scan_target(target, db_file="scan_results.db", scanners=None):
                 print("\n[WAPITI] Запуск Wapiti...")
                 wapiti_data = run_wapiti(target, temp_dir)
                 if wapiti_data:
-                    process_wapiti_result(wapiti_data, cursor, session_id)
+                    process_wapiti_result(wapiti_data, cursor, session_id, target)
                     conn.commit()
             
             if 'nuclei' in scanners:
                 print("\n[NUCLEI] Запуск Nuclei...")
                 nuclei_data = run_nuclei(target)
                 if nuclei_data:
-                    process_nuclei_result(nuclei_data, cursor, session_id)
+                    process_nuclei_result(nuclei_data, cursor, session_id, target)
                     conn.commit()
             
             # Завершаем сессию
@@ -362,7 +362,7 @@ def main():
             return 0 if success else 1
         
         elif args.command == 'report':
-            show_vulnerabilities(args.db, args.target, args.severity)
+            show_vulnerabilities(args.db, args.target)
             return 0
         
         elif args.command == 'summary':

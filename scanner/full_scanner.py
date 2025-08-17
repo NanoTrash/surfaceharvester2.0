@@ -245,85 +245,69 @@ class FullScanner:
     
     def save_nmap_vulnerabilities(self, nmap_output: str, cursor, session_id: int, target: str):
         """
-        Сохраняет уязвимости из nmap в базу данных
+        Сохраняет уязвимости из nmap в базу данных через VulnerabilityManager
         """
         try:
-            # Парсим nmap вывод на предмет уязвимостей
-            lines = nmap_output.split('\n')
-            cve_count = 0
+            from db.vulnerability_manager import VulnerabilityManager
             
-            for line in lines:
-                line = line.strip()
-                
-                # Ищем CVE в различных форматах
-                if any(pattern in line for pattern in ['CVE-', 'VULNERABLE', 'EXPLOIT', 'vulners']):
-                    # Извлекаем CVE ID
-                    cve_match = re.search(r'CVE-\d{4}-\d+', line)
-                    if cve_match:
-                        cve_id = cve_match.group(0)
-                        vulnerability_type = f"Nmap CVE: {cve_id}"
-                    else:
-                        vulnerability_type = "Nmap Vulnerability"
-                    
-                    # Извлекаем CVSS score
-                    cvss_match = re.search(r'(\d+\.\d+)', line)
-                    cvss_score = float(cvss_match.group(1)) if cvss_match else 5.0
-                    
-                    # Определяем критичность по CVSS
-                    if cvss_score >= 9.0:
-                        severity = "Critical"
-                    elif cvss_score >= 7.0:
-                        severity = "High"
-                    elif cvss_score >= 4.0:
-                        severity = "Medium"
-                    else:
-                        severity = "Low"
-                    
-                    # Ограничиваем длину описания
-                    description = line[:500] if len(line) > 500 else line
-                    
-                    # Сохраняем в БД
-                    Vulnerability.insert(
-                        cursor,
-                        resource=target,
-                        vulnerability_type=vulnerability_type,
-                        description=description,
-                        severity=severity,
-                        scanner="nmap"
-                    )
-                    cve_count += 1
+            # Создаем менеджер уязвимостей
+            vuln_manager = VulnerabilityManager()
             
-            logger.info(f"Сохранено {cve_count} уязвимостей Nmap")
+            # Подготавливаем данные для AI парсера
+            nmap_data = {
+                'output': nmap_output,
+                'target': target,
+                'scanner': 'nmap'
+            }
+            
+            # Обрабатываем и сохраняем данные
+            stats = vuln_manager.process_and_save_vulnerabilities(
+                raw_data=nmap_data,
+                scanner_name='nmap',
+                cursor=cursor,
+                session_id=session_id,
+                target_resource=target
+            )
+            
+            logger.info(f"Nmap: обработано {stats.processed}, сохранено {stats.saved_new}, пропущено дубликатов {stats.duplicates_skipped}")
+            return stats
                     
         except Exception as e:
             logger.error(f"Ошибка сохранения nmap уязвимостей: {e}")
+            return None
     
     def save_gobuster_findings(self, gobuster_output: str, cursor, session_id: int, target: str):
         """
-        Сохраняет находки gobuster в базу данных
+        Сохраняет находки gobuster в базу данных через VulnerabilityManager
         """
         try:
-            lines = gobuster_output.split('\n')
-            for line in lines:
-                if line.strip() and not line.startswith('Gobuster'):
-                    # Извлекаем найденные пути
-                    if 'Status: 200' in line or 'Status: 301' in line or 'Status: 302' in line:
-                        parts = line.split()
-                        if len(parts) >= 2:
-                            path = parts[0]
-                            status = parts[1] if len(parts) > 1 else "Unknown"
-                            
-                            Vulnerability.insert(
-                                cursor,
-                                resource=f"{target}{path}",
-                                vulnerability_type="Directory/File Found",
-                                description=f"Found: {path} (Status: {status})",
-                                severity="Low",
-                                scanner="gobuster"
-                            )
+            from db.vulnerability_manager import VulnerabilityManager
+            
+            # Создаем менеджер уязвимостей
+            vuln_manager = VulnerabilityManager()
+            
+            # Подготавливаем данные для AI парсера
+            gobuster_data = {
+                'output': gobuster_output,
+                'target': target,
+                'scanner': 'gobuster'
+            }
+            
+            # Обрабатываем и сохраняем данные
+            stats = vuln_manager.process_and_save_vulnerabilities(
+                raw_data=gobuster_data,
+                scanner_name='gobuster',
+                cursor=cursor,
+                session_id=session_id,
+                target_resource=target
+            )
+            
+            logger.info(f"Gobuster: обработано {stats.processed}, сохранено {stats.saved_new}, пропущено дубликатов {stats.duplicates_skipped}")
+            return stats
                     
         except Exception as e:
             logger.error(f"Ошибка сохранения gobuster находок: {e}")
+            return None
     
     async def full_scan(self, target: str, db_file="scan_results.db", 
                        dir_wordlist: str = None, fuzz_wordlist: str = None) -> Dict:
@@ -385,14 +369,14 @@ class FullScanner:
                     print("\n[WAPITI] Запуск Wapiti...")
                     wapiti_data = run_wapiti(target, temp_dir)
                     if wapiti_data:
-                        process_wapiti_result(wapiti_data, cursor, session_id)
+                        process_wapiti_result(wapiti_data, cursor, session_id, target)
                         conn.commit()
                     
                     # 4. Nuclei сканирование
                     print("\n[NUCLEI] Запуск Nuclei...")
                     nuclei_data = run_nuclei(target)
                     if nuclei_data:
-                        process_nuclei_result(nuclei_data, cursor, session_id)
+                        process_nuclei_result(nuclei_data, cursor, session_id, target)
                         conn.commit()
                     
                     # 5. Subfinder сканирование

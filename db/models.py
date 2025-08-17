@@ -11,7 +11,10 @@ class ModelMeta(type):
 class BaseModel(metaclass=ModelMeta):
     @classmethod
     def create_table(cls, cursor):
-        columns = [f"{k} {v}" for k, v in cls.__dict__.items() if not k.startswith("_") and not callable(v)]
+        columns = []
+        for k, v in cls.__dict__.items():
+            if not k.startswith("_") and not callable(v) and isinstance(v, str) and any(sql_type in v.upper() for sql_type in ['TEXT', 'INTEGER', 'DATETIME', 'REAL', 'BLOB']):
+                columns.append(f"{k} {v}")
         sql = f"CREATE TABLE IF NOT EXISTS {cls.__name__.lower()} ({', '.join(columns)});"
         cursor.execute(sql)
 
@@ -45,9 +48,106 @@ class Vulnerability(BaseModel):
     resource = "TEXT NOT NULL"  # URL, IP, FQDN
     vulnerability_type = "TEXT NOT NULL"  # CVE, LPE, SQLi, LFI, SSRF, Path Traversal, etc.
     description = "TEXT"
-    severity = "TEXT"
-    scanner = "TEXT"
+    severity = "TEXT DEFAULT 'Medium'"
+    scanner = "TEXT NOT NULL"
     timestamp = "DATETIME DEFAULT CURRENT_TIMESTAMP"
+    
+    # Валидные значения
+    VALID_SEVERITIES = ['Critical', 'High', 'Medium', 'Low', 'Info', 'Unknown']
+    REQUIRED_FIELDS = ['resource', 'vulnerability_type', 'scanner']
+    
+    @classmethod
+    def validate_data(cls, **kwargs):
+        """
+        Валидирует данные перед вставкой
+        """
+        errors = []
+        
+        # Проверка обязательных полей
+        for field in cls.REQUIRED_FIELDS:
+            if not kwargs.get(field):
+                errors.append(f"Обязательное поле '{field}' отсутствует или пустое")
+        
+        # Проверка severity
+        severity = kwargs.get('severity', 'Medium')
+        if severity not in cls.VALID_SEVERITIES:
+            errors.append(f"Неизвестный уровень критичности: {severity}. Допустимые: {cls.VALID_SEVERITIES}")
+        
+        # Проверка длины полей
+        max_lengths = {
+            'resource': 500,
+            'vulnerability_type': 200,
+            'description': 2000,
+            'severity': 20,
+            'scanner': 50
+        }
+        
+        for field, max_length in max_lengths.items():
+            value = str(kwargs.get(field, ''))
+            if len(value) > max_length:
+                errors.append(f"Поле '{field}' превышает максимальную длину {max_length}")
+        
+        return errors
+    
+    @classmethod
+    def insert_validated(cls, cursor, **kwargs):
+        """
+        Вставка с валидацией
+        """
+        errors = cls.validate_data(**kwargs)
+        if errors:
+            raise ValueError(f"Ошибки валидации: {'; '.join(errors)}")
+        
+        # Устанавливаем значения по умолчанию
+        kwargs.setdefault('severity', 'Medium')
+        kwargs.setdefault('description', '')
+        
+        return cls.insert(cursor, **kwargs)
+    
+    @classmethod
+    def find_duplicates(cls, cursor, resource, vulnerability_type, description_prefix=None):
+        """
+        Поиск потенциальных дубликатов
+        """
+        base_query = "SELECT * FROM vulnerability WHERE resource = ? AND vulnerability_type = ?"
+        params = [resource, vulnerability_type]
+        
+        if description_prefix:
+            base_query += " AND description LIKE ?"
+            params.append(f"{description_prefix}%")
+        
+        cursor.execute(base_query, params)
+        return cursor.fetchall()
+    
+    @classmethod
+    def get_stats_by_severity(cls, cursor, target=None):
+        """
+        Получает статистику по уровням критичности
+        """
+        base_query = """
+            SELECT severity, COUNT(*) as count 
+            FROM vulnerability 
+        """
+        params = []
+        
+        if target:
+            base_query += " WHERE resource LIKE ?"
+            params.append(f"%{target}%")
+        
+        base_query += """
+            GROUP BY severity 
+            ORDER BY CASE severity 
+                WHEN 'Critical' THEN 1 
+                WHEN 'High' THEN 2 
+                WHEN 'Medium' THEN 3 
+                WHEN 'Low' THEN 4 
+                WHEN 'Info' THEN 5 
+                ELSE 6 
+            END
+        """
+        
+        cursor.execute(base_query, params)
+        return cursor.fetchall()
 
 class ScanSession(BaseModel):
     id = "INTEGER PRIMARY KEY AUTOINCREMENT"

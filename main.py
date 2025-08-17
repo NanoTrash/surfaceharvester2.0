@@ -65,12 +65,12 @@ def main():
             # Запуск сканеров
             nikto_data = run_nikto(target, temp_dir)
             if nikto_data:
-                process_nikto_result(nikto_data, cursor, session_id)
+                process_nikto_result(nikto_data, cursor, session_id, target)
                 conn.commit()
 
             nuclei_data = run_nuclei(target)
             if nuclei_data:
-                process_nuclei_result(nuclei_data, cursor, session_id)
+                process_nuclei_result(nuclei_data, cursor, session_id, target)
                 conn.commit()
 
             # Завершаем сессию
