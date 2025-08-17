@@ -1,0 +1,383 @@
+# scanner/ai_parser.py
+
+import re
+import json
+from typing import List, Dict, Any
+import logging
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Опциональные зависимости - импортируем только если доступны
+try:
+    import spacy
+    SPACY_AVAILABLE = True
+except ImportError:
+    SPACY_AVAILABLE = False
+    logger.warning("spaCy не установлен. Установите: pip install spacy && python -m spacy download en_core_web_sm")
+
+try:
+    import nltk
+    from nltk.tokenize import word_tokenize
+    from nltk.corpus import stopwords
+    NLTK_AVAILABLE = True
+except ImportError:
+    NLTK_AVAILABLE = False
+    logger.warning("NLTK не установлен. Установите: pip install nltk")
+
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+    logger.warning("scikit-learn не установлен. Установите: pip install scikit-learn")
+
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    logger.warning("pandas не установлен. Установите: pip install pandas")
+
+# Инициализация spaCy
+nlp = None
+if SPACY_AVAILABLE:
+    try:
+        nlp = spacy.load("en_core_web_sm")
+    except OSError:
+        logger.warning("Модель spaCy en_core_web_sm не найдена. Установите: python -m spacy download en_core_web_sm")
+
+# Инициализация NLTK
+if NLTK_AVAILABLE:
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        try:
+            nltk.download('punkt', quiet=True)
+            nltk.download('stopwords', quiet=True)
+        except Exception as e:
+            logger.warning(f"Не удалось загрузить NLTK данные: {e}")
+
+class AIVulnerabilityParser:
+    def __init__(self):
+        self.vulnerability_patterns = {
+            'SQL Injection': [
+                'sql injection', 'sqli', 'sql injection vulnerability',
+                'database injection', 'sql error', 'mysql error'
+            ],
+            'XSS': [
+                'cross-site scripting', 'xss', 'reflected xss', 'stored xss',
+                'dom xss', 'script injection'
+            ],
+            'LFI': [
+                'local file inclusion', 'lfi', 'file inclusion',
+                'path traversal', 'directory traversal'
+            ],
+            'RFI': [
+                'remote file inclusion', 'rfi', 'remote file inclusion vulnerability'
+            ],
+            'SSRF': [
+                'server-side request forgery', 'ssrf', 'server side request forgery'
+            ],
+            'LPE': [
+                'local privilege escalation', 'lpe', 'privilege escalation',
+                'elevation of privilege'
+            ],
+            'RCE': [
+                'remote code execution', 'rce', 'code execution',
+                'command injection', 'os command injection'
+            ],
+            'Path Traversal': [
+                'path traversal', 'directory traversal', '../', '..\\',
+                'dot dot slash', 'directory climbing'
+            ],
+            'CSRF': [
+                'cross-site request forgery', 'csrf', 'request forgery'
+            ],
+            'Open Redirect': [
+                'open redirect', 'redirect vulnerability', 'url redirection'
+            ],
+            'Information Disclosure': [
+                'information disclosure', 'info disclosure', 'sensitive data exposure',
+                'error message disclosure', 'stack trace'
+            ],
+            'Default Credentials': [
+                'default credentials', 'default password', 'admin admin',
+                'root root', 'default login'
+            ],
+            'Outdated Software': [
+                'outdated', 'old version', 'deprecated', 'end of life',
+                'eol', 'unsupported version'
+            ]
+        }
+        
+        self.severity_keywords = {
+            'Critical': ['critical', 'severe', 'high risk', 'immediate'],
+            'High': ['high', 'serious', 'important'],
+            'Medium': ['medium', 'moderate', 'average'],
+            'Low': ['low', 'minor', 'informational']
+        }
+
+    def extract_vulnerability_type(self, text: str) -> str:
+        """
+        Извлекает тип уязвимости из текста с помощью ИИ
+        """
+        if not text:
+            return "Unknown"
+        
+        text_lower = text.lower()
+        
+        # Проверяем паттерны
+        for vuln_type, patterns in self.vulnerability_patterns.items():
+            for pattern in patterns:
+                if pattern in text_lower:
+                    return vuln_type
+        
+        # Если паттерны не найдены и доступны ИИ-инструменты, используем их
+        if SPACY_AVAILABLE and nlp and SKLEARN_AVAILABLE:
+            try:
+                # Анализируем текст с помощью spaCy
+                doc = nlp(text)
+                
+                # Извлекаем ключевые слова
+                keywords = [token.text.lower() for token in doc if not token.is_stop and token.is_alpha]
+                
+                # Создаем TF-IDF векторы для сравнения
+                all_patterns = []
+                pattern_labels = []
+                
+                for vuln_type, patterns in self.vulnerability_patterns.items():
+                    for pattern in patterns:
+                        all_patterns.append(pattern)
+                        pattern_labels.append(vuln_type)
+                
+                if all_patterns:
+                    vectorizer = TfidfVectorizer()
+                    try:
+                        # Векторизуем текст и паттерны
+                        vectors = vectorizer.fit_transform([text] + all_patterns)
+                        
+                        # Вычисляем схожесть
+                        similarities = cosine_similarity(vectors[0:1], vectors[1:])
+                        
+                        # Находим наиболее похожий паттерн
+                        max_sim_idx = similarities.argmax()
+                        max_similarity = similarities[0][max_sim_idx]
+                        
+                        if max_similarity > 0.3:  # Порог схожести
+                            return pattern_labels[max_sim_idx]
+                    except Exception as e:
+                        logger.debug(f"Ошибка TF-IDF анализа: {e}")
+            except Exception as e:
+                logger.debug(f"Ошибка spaCy анализа: {e}")
+        
+        # Если ничего не найдено, возвращаем "Unknown"
+        return "Unknown"
+
+    def extract_severity(self, text: str) -> str:
+        """
+        Извлекает уровень критичности уязвимости
+        """
+        if not text:
+            return "Medium"
+        
+        text_lower = text.lower()
+        
+        for severity, keywords in self.severity_keywords.items():
+            for keyword in keywords:
+                if keyword in text_lower:
+                    return severity
+        
+        return "Medium"  # По умолчанию
+
+    def extract_resource(self, text: str, scanner_output: Dict) -> str:
+        """
+        Извлекает ресурс (URL, IP, FQDN) из вывода сканера
+        """
+        # Пытаемся извлечь из структуры сканера
+        if isinstance(scanner_output, dict):
+            # Nuclei
+            if 'host' in scanner_output:
+                return scanner_output['host']
+            if 'matched-at' in scanner_output:
+                return scanner_output['matched-at']
+            if 'ip' in scanner_output:
+                return scanner_output['ip']
+            
+            # Nikto
+            if 'hostname' in scanner_output:
+                return scanner_output['hostname']
+            if 'target' in scanner_output:
+                return scanner_output['target']
+        
+        # Если не найдено в структуре, ищем в тексте
+        # Паттерны для URL, IP, FQDN
+        url_pattern = r'https?://[^\s]+'
+        ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
+        fqdn_pattern = r'\b[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.([a-zA-Z]{2,})\b'
+        
+        urls = re.findall(url_pattern, text)
+        if urls:
+            return urls[0]
+        
+        ips = re.findall(ip_pattern, text)
+        if ips:
+            return ips[0]
+        
+        fqdns = re.findall(fqdn_pattern, text)
+        if fqdns:
+            return fqdns[0]
+        
+        return "Unknown"
+
+    def parse_scanner_output(self, scanner_output: Any, scanner_name: str) -> List[Dict]:
+        """
+        Парсит вывод сканера и извлекает уязвимости с помощью ИИ
+        """
+        vulnerabilities = []
+        
+        try:
+            if scanner_name == 'nuclei':
+                vulnerabilities = self._parse_nuclei_output(scanner_output)
+            elif scanner_name == 'nikto':
+                vulnerabilities = self._parse_nikto_output(scanner_output)
+            else:
+                vulnerabilities = self._parse_generic_output(scanner_output, scanner_name)
+        except Exception as e:
+            logger.error(f"Ошибка парсинга вывода {scanner_name}: {e}")
+            return []
+        
+        return vulnerabilities
+
+    def _parse_nuclei_output(self, output: List[Dict]) -> List[Dict]:
+        """
+        Парсит вывод Nuclei
+        """
+        vulnerabilities = []
+        
+        if not isinstance(output, list):
+            logger.warning("Nuclei output is not a list")
+            return vulnerabilities
+        
+        for finding in output:
+            if isinstance(finding, dict):
+                try:
+                    # Извлекаем информацию
+                    resource = self.extract_resource(str(finding), finding)
+                    description = finding.get('info', {}).get('name', '')
+                    severity = finding.get('info', {}).get('severity', 'Medium')
+                    
+                    # Определяем тип уязвимости
+                    vuln_type = self.extract_vulnerability_type(description)
+                    
+                    # Проверяем CVE
+                    cve_list = finding.get('info', {}).get('cve', [])
+                    if cve_list:
+                        vuln_type = f"CVE-{cve_list[0]}"
+                    
+                    vulnerabilities.append({
+                        'resource': resource,
+                        'vulnerability_type': vuln_type,
+                        'description': description,
+                        'severity': severity,
+                        'scanner': 'nuclei'
+                    })
+                except Exception as e:
+                    logger.warning(f"Ошибка обработки Nuclei finding: {e}")
+                    continue
+        
+        return vulnerabilities
+
+    def _parse_nikto_output(self, output: Dict) -> List[Dict]:
+        """
+        Парсит вывод Nikto
+        """
+        vulnerabilities = []
+        
+        if not isinstance(output, dict):
+            logger.warning("Nikto output is not a dict")
+            return vulnerabilities
+        
+        vuln_list = output.get('vulnerabilities', [])
+        
+        for vuln in vuln_list:
+            if isinstance(vuln, dict):
+                try:
+                    # Извлекаем информацию
+                    resource = self.extract_resource(str(vuln), vuln)
+                    description = vuln.get('description', '')
+                    severity = vuln.get('severity', 'Medium')
+                    
+                    # Определяем тип уязвимости
+                    vuln_type = self.extract_vulnerability_type(description)
+                    
+                    # Проверяем OSVDB ID
+                    osvdb_id = vuln.get('osvdb_id')
+                    if osvdb_id:
+                        vuln_type = f"OSVDB-{osvdb_id}"
+                    
+                    vulnerabilities.append({
+                        'resource': resource,
+                        'vulnerability_type': vuln_type,
+                        'description': description,
+                        'severity': severity,
+                        'scanner': 'nikto'
+                    })
+                except Exception as e:
+                    logger.warning(f"Ошибка обработки Nikto vulnerability: {e}")
+                    continue
+        
+        return vulnerabilities
+
+    def _parse_generic_output(self, output: Any, scanner_name: str) -> List[Dict]:
+        """
+        Парсит вывод других сканеров
+        """
+        vulnerabilities = []
+        
+        try:
+            # Преобразуем в строку для анализа
+            output_str = str(output)
+            
+            # Извлекаем ресурс
+            resource = self.extract_resource(output_str, {})
+            
+            # Определяем тип уязвимости
+            vuln_type = self.extract_vulnerability_type(output_str)
+            
+            # Определяем критичность
+            severity = self.extract_severity(output_str)
+            
+            vulnerabilities.append({
+                'resource': resource,
+                'vulnerability_type': vuln_type,
+                'description': output_str[:200],  # Первые 200 символов
+                'severity': severity,
+                'scanner': scanner_name
+            })
+        except Exception as e:
+            logger.error(f"Ошибка обработки generic output: {e}")
+        
+        return vulnerabilities
+
+    def save_to_database(self, vulnerabilities: List[Dict], cursor) -> None:
+        """
+        Сохраняет уязвимости в базу данных
+        """
+        from db.models import Vulnerability
+        
+        for vuln in vulnerabilities:
+            try:
+                Vulnerability.insert(
+                    cursor,
+                    resource=vuln.get('resource', 'Unknown'),
+                    vulnerability_type=vuln.get('vulnerability_type', 'Unknown'),
+                    description=vuln.get('description', ''),
+                    severity=vuln.get('severity', 'Medium'),
+                    scanner=vuln.get('scanner', 'unknown')
+                )
+            except Exception as e:
+                logger.error(f"Ошибка сохранения уязвимости в БД: {e}")
+                continue

@@ -4,17 +4,47 @@ from db.models import MODEL_REGISTRY
 
 
 def setup_database(cursor):
+    """
+    Создает все таблицы в базе данных
+    """
     for model in MODEL_REGISTRY.values():
         model.create_table(cursor)
+    
+    print("[INFO] База данных инициализирована")
 
 
 def insert_initial_data(cursor):
-    from db.models import Host, Url, Software, VersionSoft, CVE, ScanResult
-
-    Host.insert(cursor, hostname="example.com", ip_address="93.184.216.34")
-    Url.insert(cursor, host_id=1, url="https://example.com")
-    Software.insert(cursor, host_id=1, name="Nginx")
-    VersionSoft.insert(cursor, software_id=1, version="1.18.0", is_latest=False)
-    VersionSoft.insert(cursor, software_id=1, version="1.24.0", is_latest=True)
-    CVE.insert(cursor, cve_id="CVE-2024-5678", description="SQL Injection", severity="High")
-    ScanResult.insert(cursor, url_id=1, cve_id=1, status="Exploitable")
+    """
+    Вставляет тестовые данные (опционально)
+    """
+    from db.models import Vulnerability, ScanSession
+    
+    # Примеры уязвимостей для тестирования
+    test_vulnerabilities = [
+        {
+            'resource': 'https://example.com',
+            'vulnerability_type': 'SQL Injection',
+            'description': 'SQL injection vulnerability in login form',
+            'severity': 'High',
+            'scanner': 'nuclei'
+        },
+        {
+            'resource': 'https://example.com/admin',
+            'vulnerability_type': 'XSS',
+            'description': 'Reflected XSS in search parameter',
+            'severity': 'Medium',
+            'scanner': 'nikto'
+        },
+        {
+            'resource': 'https://example.com/files',
+            'vulnerability_type': 'Path Traversal',
+            'description': 'Directory traversal vulnerability',
+            'severity': 'Critical',
+            'scanner': 'nuclei'
+        }
+    ]
+    
+    for vuln in test_vulnerabilities:
+        Vulnerability.insert(cursor, **vuln)
+    
+    print("[INFO] Тестовые данные добавлены")
