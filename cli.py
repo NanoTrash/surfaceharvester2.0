@@ -222,15 +222,6 @@ def main():
             conn.commit()
             print("Результаты Nuclei сохранены в базу.")
 
-            # 7. Wappalyzer
-            from scanner.wappalyzer import run_wappalyzer, process_wappalyzer_result
-            wappalyzer_data = run_wappalyzer(target)
-            from scanner.parser import extract_host_and_url
-            host_id, url_id = extract_host_and_url(target, cursor)
-            process_wappalyzer_result(wappalyzer_data, cursor, host_id)
-            conn.commit()
-            print("Результаты Wappalyzer сохранены в базу.")
-
             # Итоговый отчет
             from db.report import show_report
             show_report(cursor, target.replace("https://", "").replace("http://", ""))

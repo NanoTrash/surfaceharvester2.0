@@ -6,7 +6,6 @@ import argparse
 from db.schema import setup_database, insert_initial_data
 from db.report import show_report
 from scanner.parser import extract_host_and_url
-from scanner.wappalyzer import run_wappalyzer, process_wappalyzer_result
 from scanner.nikto import run_nikto, process_nikto_result
 from scanner.nuclei import run_nuclei, process_nuclei_result
 
@@ -31,10 +30,6 @@ def main():
     conn.commit()
 
     # Запуск сканеров
-    wappalyzer_data = run_wappalyzer(args.target)
-    process_wappalyzer_result(wappalyzer_data, cursor, host_id)
-    conn.commit()
-
     nikto_data = run_nikto(args.target)
     process_nikto_result(nikto_data, cursor, url_id)
     conn.commit()

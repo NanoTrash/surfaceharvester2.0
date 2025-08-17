@@ -75,20 +75,7 @@ def normalize_vuln_result(result, scanner_name):
             'severity': severity,
             'scanner': 'nmap'
         }
-    # Пример для wappalyzer (обычно нет CVE, но можно добавить как ПО)
-    elif scanner_name == 'wappalyzer':
-        ip = result.get('ip', None)
-        port = result.get('port', None)
-        service = result.get('service', None)
-        return {
-            'ip': ip,
-            'port': port,
-            'service': service,
-            'cve': None,
-            'severity': None,
-            'scanner': 'wappalyzer'
-        }
-    # По умолчанию — просто копируем основные поля
+    # Пример для других сканеров (обычно нет CVE, но можно добавить как ПО)
     else:
         return {
             'ip': result.get('ip', None),

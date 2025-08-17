@@ -37,8 +37,6 @@ poetry install
   `sudo apt install nikto`
 - **Nuclei**:  
   `go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest`
-- **Wappalyzer**:  
-  `npm install -g wappalyzer`
 
 > Убедитесь, что все утилиты доступны в PATH.
 
@@ -59,7 +57,7 @@ python cli.py
 
 ## Архитектура процесса
 
-1. **Сканеры** (Nmap, Nuclei, Nikto, Wappalyzer, Gobuster, Subfinder) — каждый даёт свой отчёт.
+1. **Сканеры** (Nmap, Nuclei, Nikto, Gobuster, Subfinder) — каждый даёт свой отчёт.
 2. **Парсер-нормализатор** на Python:
    - конвертирует все результаты в единую структуру;
    - нормализует поля: `ip`, `port`, `service`, `cve`, `severity`, `scanner`.
