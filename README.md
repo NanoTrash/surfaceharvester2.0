@@ -1,31 +1,87 @@
-# SurfaceHarvester 2 - Инструмент для поверхностного анализа безопасности
+# SurfaceHarvester 2 — Инструмент для поверхностного анализа безопасности
 
-Инструмент для комплексного сканирования веб-приложений и сетевых сервисов с использованием различных сканеров безопасности.
+Инструмент для комплексного сканирования веб-приложений и сетевых сервисов с использованием нескольких сканеров безопасности и AI-парсинга, с сохранением результатов в SQLite.
 
-## Возможности
+## Команды CLI (основное)
 
-- **Nmap**: Сканирование портов и сервисов с проверкой уязвимостей
-- **Wapiti**: Веб-сканер уязвимостей
-- **Nuclei**: Быстрое сканирование уязвимостей по шаблонам
-- **Subfinder**: Поиск субдоменов
-- **Gobuster**: Поиск директорий и фаззинг параметров
-- **Извлечение контактов**: Автоматическое извлечение email и телефонов с веб-страниц
-- **AI-парсинг**: Интеллектуальная обработка результатов сканирования
-- **База данных**: Сохранение результатов в SQLite
-- **Отчеты**: Генерация подробных отчетов
+- **Инициализация БД**:
+  ```bash
+  poetry install --no-root
+  poetry run python cli.py init --db scan_results.db
+  ```
+
+- **Полный скан** (nmap, wapiti, nuclei, subfinder, gobuster; с интерактивным выбором субдоменов для повторных сканов):
+  ```bash
+  poetry run python cli.py full-scan http://example.com \
+    --db scan_results.db \
+    --dir-wordlist /path/to/dir_wordlist.txt \
+    --fuzz-wordlist /path/to/fuzz_wordlist.txt
+  ```
+
+- **Поверхностный сбор** (без сохранения уязвимостей в БД, отчёт в файл):
+  ```bash
+  poetry run python cli.py surface example.com \
+    --dir-wordlist /path/to/dir_wordlist.txt \
+    --fuzz-wordlist /path/to/fuzz_wordlist.txt \
+    --output scan_results.txt
+  ```
+
+- **Просмотр уязвимостей и сводок**:
+  ```bash
+  # Полный отчёт по цели из БД
+  poetry run python cli.py report --target http://example.com --db scan_results.db
+
+  # Краткая сводка c эмодзи
+  poetry run python cli.py summary --target http://example.com --db scan_results.db
+
+  # История сессий
+  poetry run python cli.py sessions --db scan_results.db
+  ```
+
+- **Работа с целями (хосты/субдомены) из БД**:
+  ```bash
+  # Показать сохранённые цели (host.hostname)
+  poetry run python cli.py targets-list --db scan_results.db
+
+  # Показать только субдомены
+  poetry run python cli.py targets-list --db scan_results.db --subdomains
+
+  # Выбрать цели из БД и запустить полные сканы
+  poetry run python cli.py targets-scan \
+    --db scan_results.db \
+    --dir-wordlist /path/to/dir_wordlist.txt \
+    --fuzz-wordlist /path/to/fuzz_wordlist.txt \
+    --subdomains
+  ```
+
+## Принципы работы
+
+- **Пайплайн полного скана**:
+  - Nmap: скан портов и извлечение уязвимостей (vulners).
+  - Извлечение контактов (email/телефоны) со стартовой страницы.
+  - Wapiti: веб-уязвимости; Nuclei: шаблонное сканирование.
+  - Subfinder: поиск субдоменов.
+  - Gobuster dir/fuzz: директории и параметры.
+  - Все результаты уязвимостей проходят **AI-парсинг** и сохраняются в `vulnerability`.
+
+- **Хранение целей**:
+  - Таблица `host`: `hostname`, `ip_address`, `type` (`domain`/`subdomain`/`ip`), `parent_domain`, `session_id`, `last_scanned_session_id`, `source`, `target`.
+  - Таблица `subdomain`: `name`, `parent_domain`, `host_id`, `session_first_seen`, `session_last_seen`, `source`, `target`.
+  - Результаты subfinder и IP целей автоматически сохраняются и индексируются.
+
+- **Сессии и отчёты**:
+  - Каждое полное сканирование — запись в `scansession`.
+  - Просмотр отчётов и сводок через команды `report`, `summary`, `sessions`.
+  - Повторные сканы субдоменов доступны интерактивно сразу после `full-scan` и через `targets-scan`.
 
 ## Установка
 
 ### Требования
 
-- Python 3.8+
-- Poetry (для управления зависимостями)
-- Следующие инструменты должны быть установлены в системе:
-  - `nmap` - сканирование портов
-  - `wapiti` - веб-сканер уязвимостей
-  - `nuclei` - сканер уязвимостей
-  - `subfinder` - поиск субдоменов
-  - `gobuster` - поиск директорий и фаззинг
+- Python 3.9+
+- Poetry
+- Инструменты системы:
+  - `nmap`, `wapiti`, `nuclei`, `subfinder`, `gobuster`
 
 ### Установка зависимостей
 
@@ -34,65 +90,38 @@
 git clone <repository-url>
 cd pntst
 
-# Создание виртуального окружения и установка зависимостей
-poetry install
+# Установка зависимостей (без установки самого пакета)
+poetry install --no-root
 
-# Активация виртуального окружения
-poetry shell
-
-# Установка spaCy модели (для AI-парсинга)
-python -m spacy download en_core_web_sm
+# (опционально) Установка spaCy модели для AI-парсинга
+poetry run python -m spacy download en_core_web_sm
 ```
 
-### Установка инструментов сканирования
+### Установка инструментов сканирования (Ubuntu/Debian)
 
-#### Ubuntu/Debian:
 ```bash
-# Nmap
-sudo apt update && sudo apt install -y nmap
-
-# Wapiti
-sudo apt install -y wapiti
+sudo apt update && sudo apt install -y nmap wapiti gobuster
 
 # Nuclei
 curl -sfL https://raw.githubusercontent.com/projectdiscovery/nuclei/master/v2/cmd/nuclei/install.sh | sh -s
 
 # Subfinder
 curl -sfL https://raw.githubusercontent.com/projectdiscovery/subfinder/master/v2/cmd/subfinder/install.sh | sh -s
-
-# Gobuster
-sudo apt install -y gobuster
 ```
 
-## Использование
-
-### Полное сканирование
+### Быстрый старт
 
 ```bash
-# Полное сканирование с использованием всех инструментов
-python cli.py full-scan http://example.com --dir-wordlist /path/to/dir_wordlist.txt --fuzz-wordlist /path/to/fuzz_wordlist.txt
-```
+# 1) Инициализация БД
+poetry run python cli.py init --db scan_results.db
 
-### Поверхностное сканирование
+# 2) Первый полный скан
+poetry run python cli.py full-scan http://example.com \
+  --db scan_results.db \
+  --dir-wordlist /path/to/dir_wordlist.txt \
+  --fuzz-wordlist /path/to/fuzz_wordlist.txt
 
-```bash
-# Сканирование поверхности (nmap, gobuster, subfinder, контакты)
-python cli.py surface http://example.com --dir-wordlist /path/to/dir_wordlist.txt --fuzz-wordlist /path/to/fuzz_wordlist.txt
-```
-
-### Просмотр отчетов
-
-```bash
-# Просмотр отчета по конкретной цели
-python cli.py report --target http://example.com
-
-# Список всех сессий сканирования
-python cli.py list-sessions
-```
-
-### Инициализация базы данных
-
-```bash
-# Создание базы данных
-python cli.py init
+# 3) Просмотр целей и запуск повторных сканов
+poetry run python cli.py targets-list --db scan_results.db --subdomains
+poetry run python cli.py targets-scan --db scan_results.db --dir-wordlist /path/to/dir_wordlist.txt --fuzz-wordlist /path/to/fuzz_wordlist.txt --subdomains
 ```

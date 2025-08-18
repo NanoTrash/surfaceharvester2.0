@@ -17,7 +17,8 @@ from scanner.wapiti import run_wapiti, process_wapiti_result
 from scanner.nuclei import run_nuclei, process_nuclei_result
 from scanner.ai_parser import AIVulnerabilityParser
 from db.schema import setup_database
-from db.models import ScanSession, Vulnerability
+from db.models import ScanSession, Vulnerability, Host, Subdomain
+import socket
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,110 @@ class FullScanner:
             return result.returncode == 0
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return False
+
+    def resolve_ip(self, hostname: str) -> str:
+        """Возвращает IPv4 адрес для хоста, если возможно"""
+        try:
+            return socket.gethostbyname(hostname)
+        except Exception:
+            return ""
+
+    def upsert_host(self, cursor, *, hostname: str = None, ip_address: str = None,
+                    session_id: int = None, target: str = None, host_type: str = 'domain',
+                    source: str = None, parent_domain: str = None, last_scanned_session_id: int = None):
+        """Создаёт или обновляет запись в host по hostname/ip"""
+        try:
+            if hostname:
+                cursor.execute("SELECT id FROM host WHERE hostname = ? LIMIT 1", (hostname,))
+                row = cursor.fetchone()
+                if row:
+                    update_fields = {}
+                    if ip_address:
+                        update_fields['ip_address'] = ip_address
+                    if session_id is not None:
+                        update_fields['session_id'] = session_id
+                    if target is not None:
+                        update_fields['target'] = target
+                    if host_type:
+                        update_fields['type'] = host_type
+                    if source:
+                        update_fields['source'] = source
+                    if parent_domain is not None:
+                        update_fields['parent_domain'] = parent_domain
+                    if last_scanned_session_id is not None:
+                        update_fields['last_scanned_session_id'] = last_scanned_session_id
+                    if update_fields:
+                        Host.update(cursor, row[0], **update_fields)
+                    return
+            if ip_address and not hostname:
+                cursor.execute("SELECT id FROM host WHERE ip_address = ? LIMIT 1", (ip_address,))
+                row = cursor.fetchone()
+                if row:
+                    update_fields = {}
+                    if session_id is not None:
+                        update_fields['session_id'] = session_id
+                    if target is not None:
+                        update_fields['target'] = target
+                    if host_type:
+                        update_fields['type'] = host_type
+                    if source:
+                        update_fields['source'] = source
+                    if parent_domain is not None:
+                        update_fields['parent_domain'] = parent_domain
+                    if last_scanned_session_id is not None:
+                        update_fields['last_scanned_session_id'] = last_scanned_session_id
+                    if update_fields:
+                        Host.update(cursor, row[0], **update_fields)
+                    return
+            # Создаём новую запись
+            Host.insert(cursor,
+                        hostname=hostname or '',
+                        ip_address=ip_address or '',
+                        session_id=session_id,
+                        target=target or '',
+                        type=host_type,
+                        source=source or '',
+                        parent_domain=parent_domain or '',
+                        last_scanned_session_id=last_scanned_session_id)
+        except Exception as e:
+            logger.warning(f"Не удалось upsert host {hostname or ip_address}: {e}")
+
+    def upsert_subdomain(self, cursor, *, name: str, parent_domain: str, session_id: int, target: str, source: str):
+        """Создаёт или обновляет запись в subdomain"""
+        try:
+            cursor.execute("SELECT id, session_first_seen, session_last_seen FROM subdomain WHERE name = ? LIMIT 1", (name,))
+            row = cursor.fetchone()
+            if row:
+                sub_id, first_seen, last_seen = row
+                update_fields = {
+                    'session_last_seen': session_id,
+                    'parent_domain': parent_domain,
+                    'target': target,
+                    'source': source
+                }
+                Subdomain.update(cursor, sub_id, **update_fields)
+                return sub_id
+            # Пробуем найти host.id
+            host_id = None
+            try:
+                cursor.execute("SELECT id FROM host WHERE hostname = ? LIMIT 1", (name,))
+                hr = cursor.fetchone()
+                if hr:
+                    host_id = hr[0]
+            except Exception:
+                pass
+            Subdomain.insert(cursor,
+                             name=name,
+                             parent_domain=parent_domain,
+                             host_id=host_id,
+                             session_first_seen=session_id,
+                             session_last_seen=session_id,
+                             target=target,
+                             source=source)
+            return cursor.lastrowid
+        except Exception as e:
+            logger.warning(f"Не удалось upsert subdomain {name}: {e}")
+            return None
     
     def run_nmap_scan(self, target):
         """
@@ -351,6 +456,15 @@ class FullScanner:
                 conn.commit()
                 
                 if is_ip:
+                    # Сохраняем IP цель в host
+                    self.upsert_host(cursor,
+                                     ip_address=target,
+                                     session_id=session_id,
+                                     target=target,
+                                     host_type='ip',
+                                     source='nmap',
+                                     last_scanned_session_id=session_id)
+                    conn.commit()
                     all_results.append({
                         'target': target,
                         'type': 'ip',
@@ -360,6 +474,17 @@ class FullScanner:
                     # Очищаем target от протокола
                     clean_target = target.replace("http://", "").replace("https://", "")
                     url = f"http://{clean_target}"
+                    # Сохраняем сам домен в host
+                    resolved_ip = self.resolve_ip(clean_target)
+                    self.upsert_host(cursor,
+                                     hostname=clean_target,
+                                     ip_address=resolved_ip,
+                                     session_id=session_id,
+                                     target=target,
+                                     host_type='domain',
+                                     source='full_scan',
+                                     last_scanned_session_id=session_id)
+                    conn.commit()
                     
                     # 2. Извлечение контактов
                     print("\n[CONTACTS] Извлечение контактов...")
@@ -382,6 +507,24 @@ class FullScanner:
                     # 5. Subfinder сканирование
                     print("\n[SUBFINDER] Запуск Subfinder...")
                     subfinder_result = self.run_subfinder(clean_target)
+                    # Сохраняем субдомены в host
+                    for sub in subfinder_result:
+                        sub_ip = self.resolve_ip(sub)
+                        self.upsert_host(cursor,
+                                         hostname=sub,
+                                         ip_address=sub_ip,
+                                         session_id=session_id,
+                                         target=target,
+                                         host_type='subdomain',
+                                         source='subfinder',
+                                         parent_domain=clean_target)
+                        self.upsert_subdomain(cursor,
+                                              name=sub,
+                                              parent_domain=clean_target,
+                                              session_id=session_id,
+                                              target=target,
+                                              source='subfinder')
+                    conn.commit()
                     
                     # 6. Gobuster dir сканирование (если есть словарь)
                     gobuster_dir_result = ""

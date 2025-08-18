@@ -11,6 +11,7 @@ import asyncio
 
 from db.schema import setup_database, insert_initial_data
 from db.report import show_report, show_summary, show_summary_report
+from db.report import list_targets
 from scanner.wapiti import run_wapiti, process_wapiti_result
 from scanner.nuclei import run_nuclei, process_nuclei_result
 from scanner.ai_parser import AIVulnerabilityParser
@@ -149,7 +150,62 @@ async def full_scan_target(target, db_file="scan_results.db", dir_wordlist=None,
             print(f"- {res['target']} ({res['type']})")
             if 'subfinder' in res and res['subfinder']:
                 print(f"  Субдомены: {len(res['subfinder'])} найдено")
-        
+
+        # Интерактивный выбор субдоменов для повторного полного сканирования
+        # Собираем уникальные субдомены из результатов
+        unique_subdomains = []
+        seen = set()
+        for res in scan_data['results']:
+            subs = res.get('subfinder') or []
+            for sub in subs:
+                if sub not in seen:
+                    seen.add(sub)
+                    unique_subdomains.append(sub)
+
+        if unique_subdomains:
+            print("\n[SUBDOMAINS] Найдены субдомены:")
+            for idx, sub in enumerate(unique_subdomains, 1):
+                print(f"  {idx}. {sub}")
+
+            try:
+                choice = input("\nЗапустить полные сканы для субдоменов? (y/N): ").strip().lower()
+            except EOFError:
+                choice = 'n'
+
+            if choice == 'y':
+                try:
+                    raw_sel = input("Укажите номера через запятую или имена субдоменов (или 'all'): ").strip()
+                except EOFError:
+                    raw_sel = ''
+
+                selected = []
+                if raw_sel.lower() == 'all':
+                    selected = unique_subdomains
+                else:
+                    tokens = [t.strip() for t in raw_sel.split(',') if t.strip()]
+                    for token in tokens:
+                        if token.isdigit():
+                            i = int(token)
+                            if 1 <= i <= len(unique_subdomains):
+                                selected.append(unique_subdomains[i - 1])
+                        else:
+                            if token in seen:
+                                selected.append(token)
+
+                # Убираем дубликаты, если пользователь указал и номер, и имя
+                selected = list(dict.fromkeys(selected))
+
+                if selected:
+                    print(f"\n[CHAIN SCAN] Запускаю повторные полные сканы для {len(selected)} субдоменов...")
+                    for sub in selected:
+                        sub_target = f"http://{sub}"
+                        print(f"\n[CHAIN SCAN] Цель: {sub_target}")
+                        try:
+                            sub_scan = await scanner.full_scan(sub_target, db_file, dir_wordlist, fuzz_wordlist)
+                            print(f"[CHAIN SCAN] Сессия ID: {sub_scan['session_id']}")
+                        except Exception as e:
+                            print(f"[CHAIN SCAN][ERROR] {sub_target}: {e}")
+
         return True
         
     except Exception as e:
@@ -324,6 +380,18 @@ def main():
     init_parser = subparsers.add_parser('init', help='Инициализировать базу данных')
     init_parser.add_argument('--db', default='scan_results.db', help='Файл базы данных')
     init_parser.add_argument('--test-data', action='store_true', help='Добавить тестовые данные')
+
+    # Команда targets-list
+    targets_list_parser = subparsers.add_parser('targets-list', help='Показать сохраненные цели')
+    targets_list_parser.add_argument('--db', default='scan_results.db', help='Файл базы данных')
+    targets_list_parser.add_argument('--subdomains', action='store_true', help='Показывать только субдомены')
+
+    # Команда targets-scan
+    targets_scan_parser = subparsers.add_parser('targets-scan', help='Выбрать цели из БД и запустить полные сканы')
+    targets_scan_parser.add_argument('--db', default='scan_results.db', help='Файл базы данных')
+    targets_scan_parser.add_argument('--dir-wordlist', required=True, help='Путь к словарю для gobuster dir')
+    targets_scan_parser.add_argument('--fuzz-wordlist', help='Путь к словарю для gobuster fuzz')
+    targets_scan_parser.add_argument('--subdomains', action='store_true', help='Выбирать только субдомены')
     
     args = parser.parse_args()
     
@@ -382,6 +450,68 @@ def main():
             conn.commit()
             conn.close()
             print(f"[SUCCESS] База данных {args.db} инициализирована")
+            return 0
+        
+        elif args.command == 'targets-list':
+            if not os.path.exists(args.db):
+                print(f"[ERROR] База данных {args.db} не найдена")
+                return 1
+            conn = sqlite3.connect(args.db)
+            cursor = conn.cursor()
+            targets = list_targets(cursor, only_subdomains=args.subdomains)
+            conn.close()
+            if not targets:
+                print("Целей не найдено")
+                return 0
+            print("\nСохраненные цели:")
+            for i, t in enumerate(targets, 1):
+                print(f"  {i}. {t}")
+            return 0
+
+        elif args.command == 'targets-scan':
+            if not os.path.exists(args.db):
+                print(f"[ERROR] База данных {args.db} не найдена")
+                return 1
+            conn = sqlite3.connect(args.db)
+            cursor = conn.cursor()
+            targets = list_targets(cursor, only_subdomains=args.subdomains)
+            conn.close()
+            if not targets:
+                print("Целей не найдено")
+                return 1
+            print("\nВыберите цели для сканирования:")
+            for i, t in enumerate(targets, 1):
+                print(f"  {i}. {t}")
+            try:
+                raw_sel = input("Укажите номера через запятую или 'all': ").strip()
+            except EOFError:
+                raw_sel = ''
+            selected = []
+            if raw_sel.lower() == 'all':
+                selected = targets
+            else:
+                tokens = [t.strip() for t in raw_sel.split(',') if t.strip()]
+                for token in tokens:
+                    if token.isdigit():
+                        i = int(token)
+                        if 1 <= i <= len(targets):
+                            selected.append(targets[i - 1])
+            selected = list(dict.fromkeys(selected))
+            if not selected:
+                print("Не выбрано ни одной цели")
+                return 1
+            # Запускаем полные сканы последовательно
+            for t in selected:
+                sub_target = t if t.startswith('http') else f"http://{t}"
+                print(f"\n[CHAIN SCAN] Цель: {sub_target}")
+                success = asyncio.run(full_scan_target(
+                    sub_target,
+                    args.db,
+                    args.dir_wordlist,
+                    args.fuzz_wordlist
+                ))
+                if not success:
+                    print(f"[ERROR] Ошибка при сканировании {sub_target}")
             return 0
             
     except Exception as e:

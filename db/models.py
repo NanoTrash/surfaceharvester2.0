@@ -160,12 +160,29 @@ class Host(BaseModel):
     id = "INTEGER PRIMARY KEY AUTOINCREMENT"
     hostname = "TEXT"
     ip_address = "TEXT"
+    session_id = "INTEGER"  # Сессия, в которой объект обнаружен
+    target = "TEXT"  # Исходная цель (URL/домен), относительно которой найден объект
+    type = "TEXT DEFAULT 'domain'"  # domain | subdomain | ip
+    source = "TEXT"  # инструмент-источник (subfinder, nmap, etc.)
+    parent_domain = "TEXT"  # корневой домен для субдоменов
+    last_scanned_session_id = "INTEGER"  # последняя сессия полного сканирования этого хоста
     created_at = "DATETIME DEFAULT CURRENT_TIMESTAMP"
 
 class Url(BaseModel):
     id = "INTEGER PRIMARY KEY AUTOINCREMENT"
     host_id = "INTEGER"
     url = "TEXT NOT NULL"
+    created_at = "DATETIME DEFAULT CURRENT_TIMESTAMP"
+
+class Subdomain(BaseModel):
+    id = "INTEGER PRIMARY KEY AUTOINCREMENT"
+    name = "TEXT NOT NULL"  # полное имя субдомена
+    parent_domain = "TEXT"  # корневой домен
+    host_id = "INTEGER"  # ссылка на host.id, если создан
+    session_first_seen = "INTEGER"  # id сессии, в которой впервые увидели
+    session_last_seen = "INTEGER"  # последняя сессия, где встречался
+    target = "TEXT"  # исходная цель запуска, если применимо
+    source = "TEXT"  # subfinder, nmap и т.п.
     created_at = "DATETIME DEFAULT CURRENT_TIMESTAMP"
 
 class CVE(BaseModel):

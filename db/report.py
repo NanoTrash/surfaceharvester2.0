@@ -65,6 +65,19 @@ def get_scan_sessions(cursor):
     cursor.execute(sql)
     return cursor.fetchall()
 
+def list_targets(cursor, only_subdomains=False):
+    """
+    Возвращает список целей из БД (host + subdomain)
+    """
+    targets = []
+    if only_subdomains:
+        cursor.execute("SELECT DISTINCT name FROM subdomain ORDER BY name")
+        targets = [row[0] for row in cursor.fetchall()]
+    else:
+        cursor.execute("SELECT DISTINCT hostname FROM host WHERE hostname IS NOT NULL AND hostname != '' ORDER BY hostname")
+        targets = [row[0] for row in cursor.fetchall()]
+    return targets
+
 def show_report(cursor, target):
     """
     Показывает полный отчет по сканированию

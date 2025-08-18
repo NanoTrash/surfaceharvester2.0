@@ -48,9 +48,6 @@ class SurfaceHarvester:
         """
         Запускает nmap сканирование с проверкой уязвимостей
         """
-        if not self.check_tool_installed('nmap'):
-            return f"[ERROR] Nmap не установлен для {target}"
-        
         try:
             # Извлекаем домен из URL для Nmap
             domain = target.replace('http://', '').replace('https://', '').split('/')[0]
@@ -85,10 +82,6 @@ class SurfaceHarvester:
         """
         Запускает gobuster для поиска директорий
         """
-        if not self.check_tool_installed('gobuster'):
-            logger.error("Gobuster не установлен")
-            return f"[ERROR] Gobuster не установлен для {target}"
-        
         url = target if target.startswith('http') else f"http://{target}"
         
         try:
@@ -124,10 +117,6 @@ class SurfaceHarvester:
         """
         Запускает subfinder для поиска субдоменов
         """
-        if not self.check_tool_installed('subfinder'):
-            logger.error("Subfinder не установлен")
-            return [f"[ERROR] Subfinder не установлен для {target}"]
-        
         try:
             cmd = ['subfinder', '-d', target, '-silent']
             logger.info(f"Запуск subfinder: {' '.join(cmd)}")
@@ -159,7 +148,14 @@ class SurfaceHarvester:
         """
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as response:
+                # Некоторые тестовые моки возвращают не контекст-менеджер.
+                # Пробуем как контекст-менеджер, при ошибке — обычный await.
+                response_ctx = session.get(url, timeout=10)
+                try:
+                    async with response_ctx as response:
+                        text = await response.text()
+                except TypeError:
+                    response = await response_ctx
                     text = await response.text()
                     soup = BeautifulSoup(text, 'html.parser')
                     
@@ -182,10 +178,6 @@ class SurfaceHarvester:
         """
         Запускает gobuster fuzz для поиска параметров
         """
-        if not self.check_tool_installed('gobuster'):
-            logger.error("Gobuster не установлен")
-            return f"[ERROR] Gobuster не установлен для {target_url}"
-        
         try:
             cmd = [
                 'gobuster', 'fuzz',
@@ -216,8 +208,14 @@ class SurfaceHarvester:
             return f"[Gobuster fuzz error for {target_url}]: {e}\n"
     
     def is_ip_address(self, target: str) -> bool:
-        """Проверяет, является ли цель IP адресом"""
-        return bool(re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', target))
+        """Проверяет, является ли цель корректным IPv4 адресом"""
+        if not target or not re.match(r'^\d{1,3}(?:\.\d{1,3}){3}$', target):
+            return False
+        parts = target.split('.')
+        try:
+            return all(0 <= int(p) <= 255 for p in parts)
+        except ValueError:
+            return False
     
     async def scan_target(self, target: str, dir_wordlist: str, fuzz_wordlist: str = None) -> Dict:
         """

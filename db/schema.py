@@ -13,6 +13,8 @@ def setup_database(cursor):
     
     # Создаем индексы для оптимизации запросов
     create_indexes(cursor)
+    # Миграции для существующих таблиц
+    migrate_schema(cursor)
     
     print("[INFO] База данных инициализирована")
 
@@ -42,10 +44,19 @@ def create_indexes(cursor):
         # Индексы для таблицы host
         "CREATE INDEX IF NOT EXISTS idx_host_hostname ON host(hostname)",
         "CREATE INDEX IF NOT EXISTS idx_host_ip ON host(ip_address)",
+        "CREATE INDEX IF NOT EXISTS idx_host_session_id ON host(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_host_parent_domain ON host(parent_domain)",
+        "CREATE INDEX IF NOT EXISTS idx_host_type ON host(type)",
         
         # Индексы для таблицы url
         "CREATE INDEX IF NOT EXISTS idx_url_host_id ON url(host_id)",
         "CREATE INDEX IF NOT EXISTS idx_url_url ON url(url)",
+
+        # Индексы для таблицы subdomain
+        "CREATE INDEX IF NOT EXISTS idx_subdomain_name ON subdomain(name)",
+        "CREATE INDEX IF NOT EXISTS idx_subdomain_parent ON subdomain(parent_domain)",
+        "CREATE INDEX IF NOT EXISTS idx_subdomain_host_id ON subdomain(host_id)",
+        "CREATE INDEX IF NOT EXISTS idx_subdomain_last_seen ON subdomain(session_last_seen)",
         
         # Индексы для таблицы cve
         "CREATE INDEX IF NOT EXISTS idx_cve_id ON cve(cve_id)",
@@ -65,6 +76,56 @@ def create_indexes(cursor):
     
     print("[INFO] Индексы созданы")
 
+
+def _table_columns(cursor, table_name: str):
+    try:
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        return {row[1] for row in cursor.fetchall()}
+    except Exception:
+        return set()
+
+
+def migrate_schema(cursor):
+    """
+    Добавляет недостающие колонки в существующие таблицы
+    """
+    try:
+        # host: session_id, target, type, source, parent_domain, last_scanned_session_id
+        host_cols = _table_columns(cursor, 'host')
+        planned_cols = {
+            'session_id': "INTEGER",
+            'target': "TEXT",
+            'type': "TEXT DEFAULT 'domain'",
+            'source': "TEXT",
+            'parent_domain': "TEXT",
+            'last_scanned_session_id': "INTEGER",
+        }
+        for col, ddl in planned_cols.items():
+            if col not in host_cols and host_cols:
+                try:
+                    cursor.execute(f"ALTER TABLE host ADD COLUMN {col} {ddl}")
+                except Exception as e:
+                    print(f"[WARNING] Не удалось добавить колонку host.{col}: {e}")
+        # subdomain: если таблицы нет — создать
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='subdomain'")
+        if cursor.fetchone() is None:
+            try:
+                cursor.execute(
+                    "CREATE TABLE IF NOT EXISTS subdomain ("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "name TEXT NOT NULL,"
+                    "parent_domain TEXT,"
+                    "host_id INTEGER,"
+                    "session_first_seen INTEGER,"
+                    "session_last_seen INTEGER,"
+                    "target TEXT,"
+                    "source TEXT,"
+                    "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
+                )
+            except Exception as e:
+                print(f"[WARNING] Не удалось создать таблицу subdomain: {e}")
+    except Exception as e:
+        print(f"[WARNING] Миграция схемы завершилась с предупреждениями: {e}")
 
 def insert_initial_data(cursor):
     """

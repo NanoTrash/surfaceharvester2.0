@@ -281,7 +281,8 @@ class AIVulnerabilityParser:
                     # Проверяем CVE
                     cve_list = finding.get('info', {}).get('cve', [])
                     if cve_list:
-                        vuln_type = f"CVE-{cve_list[0]}"
+                        first = str(cve_list[0])
+                        vuln_type = first if first.upper().startswith("CVE-") else f"CVE-{first}"
                     
                     vulnerabilities.append({
                         'resource': resource,
