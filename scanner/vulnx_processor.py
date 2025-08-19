@@ -35,61 +35,40 @@ class VulnXProcessor:
     def _ensure_vulnx_installed(self):
         """Проверяет и устанавливает vulnx если нужно"""
         try:
-            result = subprocess.run(['vulnx', 'version'], 
-                                  capture_output=True, text=True, timeout=10)
-            if result.returncode == 0:
-                logger.info(f"vulnx установлен: {result.stdout.strip()}")
+            # Простая проверка что vulnx доступен
+            result = subprocess.run(['vulnx', '--help'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0 or result.returncode == 1:  # help может возвращать 1
+                logger.info(f"vulnx доступен: {result.stdout[:100]}...")
                 return
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
         
-        logger.info("Устанавливаю vulnx...")
-        try:
-            # Устанавливаем через go install
-            subprocess.run(['go', 'install', '-v', 'github.com/projectdiscovery/cvemap/cmd/cvemap@latest'], 
-                          check=True, timeout=300)
-            
-            # Создаем симлинк vulnx -> cvemap для совместимости
-            go_bin = subprocess.run(['go', 'env', 'GOPATH'], capture_output=True, text=True)
-            if go_bin.returncode == 0:
-                gopath = go_bin.stdout.strip()
-                cvemap_path = Path(gopath) / "bin" / "cvemap"
-                vulnx_path = Path(gopath) / "bin" / "vulnx"
-                
-                if cvemap_path.exists() and not vulnx_path.exists():
-                    vulnx_path.symlink_to(cvemap_path)
-                    logger.info("Создан симлинк vulnx -> cvemap")
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Ошибка установки vulnx: {e}")
-            raise
+        logger.warning("vulnx не найден или недоступен. Установите вручную:")
+        logger.warning("go install -v github.com/projectdiscovery/cvemap/cmd/cvemap@latest")
+        logger.warning("ln -s $(which cvemap) ~/go/bin/vulnx")
     
     def _init_db_schema(self):
         """Инициализирует схему БД для vulnx"""
-        schema_file = Path(__file__).parent.parent / "db" / "vulnx_schema.sql"
-        if not schema_file.exists():
-            logger.warning(f"Схема БД не найдена: {schema_file}")
-            return
-            
         try:
+            # Схема уже создается через models.py, просто проверяем что таблицы существуют
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            with open(schema_file, 'r') as f:
-                schema_sql = f.read()
+            # Проверяем существование таблиц
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('exploits', 'cvecache', 'cveprocessing')")
+            existing_tables = [row[0] for row in cursor.fetchall()]
             
-            # Выполняем каждую команду CREATE отдельно
-            for statement in schema_sql.split(';'):
-                statement = statement.strip()
-                if statement and statement.upper().startswith('CREATE'):
-                    cursor.execute(statement)
-            
-            conn.commit()
             conn.close()
-            logger.info("Схема БД для vulnx инициализирована")
+            
+            if len(existing_tables) == 3:
+                logger.info("Таблицы vulnx уже существуют в БД")
+            else:
+                logger.warning(f"Не все таблицы vulnx найдены. Найдено: {existing_tables}")
+                logger.warning("Запустите: poetry run python cli.py init --db scan_results.db")
             
         except Exception as e:
-            logger.error(f"Ошибка инициализации схемы БД: {e}")
+            logger.error(f"Ошибка проверки схемы БД: {e}")
     
     def extract_cve_ids(self, vulnerability_text: str) -> List[str]:
         """Извлекает CVE идентификаторы из текста уязвимости"""
@@ -105,7 +84,7 @@ class VulnXProcessor:
             
             cursor.execute("""
                 SELECT vulnx_response, last_checked, is_stale 
-                FROM cve_cache 
+                FROM cvecache 
                 WHERE cve_id = ?
             """, (cve_id,))
             
@@ -368,7 +347,7 @@ class VulnXProcessor:
             cursor = conn.cursor()
             
             cursor.execute("""
-                INSERT OR REPLACE INTO cve_cache 
+                INSERT OR REPLACE INTO cvecache 
                 (cve_id, vulnx_response, exploits_found, last_checked, is_stale)
                 VALUES (?, ?, ?, ?, 0)
             """, (cve_id, json.dumps(vulnx_response), exploits_count, datetime.now().isoformat()))
@@ -424,7 +403,7 @@ class VulnXProcessor:
             cursor = conn.cursor()
             
             cursor.execute("""
-                INSERT OR REPLACE INTO cve_processing 
+                INSERT OR REPLACE INTO cveprocessing 
                 (vulnerability_id, cve_id, status, vulnx_checked, last_processed, error_message)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (vulnerability_id, cve_id, status, vulnx_checked, 
@@ -542,10 +521,10 @@ class VulnXProcessor:
             cursor.execute("""
                 SELECT DISTINCT v.id, v.description
                 FROM vulnerability v
-                LEFT JOIN cve_processing cp ON v.id = cp.vulnerability_id
+                LEFT JOIN cveprocessing cp ON v.id = cp.vulnerability_id
                 WHERE (v.description LIKE '%CVE-%' OR v.description LIKE '%cve-%')
                 AND (cp.vulnerability_id IS NULL OR cp.status = 'failed')
-                ORDER BY v.created_at DESC
+                ORDER BY v.timestamp DESC
                 LIMIT ?
             """, (limit,))
             

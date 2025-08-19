@@ -14,7 +14,7 @@ import sqlite3
 from datetime import datetime
 import time
 
-from scanner.wapiti import run_wapiti, process_wapiti_result
+# from scanner.wapiti import run_wapiti, process_wapiti_result  # УДАЛЕНО: Wapiti больше не используется
 from scanner.nuclei import run_nuclei, process_nuclei_result
 from scanner.ai_parser import AIVulnerabilityParser
 from db.schema import setup_database
@@ -59,7 +59,7 @@ class FullScanner:
             # Разные флаги для разных инструментов
             version_flags = {
                 'nmap': ['-V'],
-                'wapiti': ['--version'],
+                # 'wapiti': ['--version'],  # УДАЛЕНО: Wapiti больше не используется
                 'nuclei': ['-version'],
                 'subfinder': ['-version'],
                 'gobuster': ['version']
@@ -304,6 +304,9 @@ class FullScanner:
                     logger.info(f"Найдено {len(emails)} email и {len(phones)} телефонов на {url}")
                     return emails, phones
                     
+        except asyncio.CancelledError:
+            logger.warning(f"Извлечение контактов для {url} было прервано пользователем")
+            return [], []
         except Exception as e:
             logger.error(f"[Extract contacts error for {url}]: {e}")
             return [], []
@@ -521,16 +524,16 @@ class FullScanner:
                     except Exception as _e:
                         logger.warning(f"Не удалось сохранить контакты: {_e}")
                     
-                    # 3. Wapiti сканирование
-                    print(f"\n[{_ts()}] [WAPITI] Запуск Wapiti...")
-                    _wapiti_t0 = time.perf_counter()
-                    wapiti_data = run_wapiti(normalized_target, temp_dir)
-                    if wapiti_data:
-                        process_wapiti_result(wapiti_data, cursor, session_id, normalized_target)
-                        conn.commit()
-                    print(f"[{_ts()}] [WAPITI] Завершено за {time.perf_counter() - _wapiti_t0:.2f}s")
+                    # 3. WAPITI УДАЛЕН - был нестабильным
+                    # print(f"\n[{_ts()}] [WAPITI] Запуск Wapiti...")
+                    # _wapiti_t0 = time.perf_counter()
+                    # wapiti_data = run_wapiti(normalized_target, temp_dir)
+                    # if wapiti_data:
+                    #     process_wapiti_result(wapiti_data, cursor, session_id, normalized_target)
+                    #     conn.commit()
+                    # print(f"[{_ts()}] [WAPITI] Завершено за {time.perf_counter() - _wapiti_t0:.2f}s")
                     
-                    # 4. Nuclei сканирование
+                    # 3. Nuclei сканирование (было 4, но убрали Wapiti)
                     print(f"\n[{_ts()}] [NUCLEI] Запуск Nuclei...")
                     _nuclei_t0 = time.perf_counter()
                     nuclei_data = run_nuclei(normalized_target)

@@ -47,30 +47,68 @@ if SPACY_AVAILABLE:
     try:
         nlp = spacy.load("en_core_web_sm")
     except OSError:
-        # Автоматическая установка модели при разрешении через ENV
+        # Автоматическая установка модели (по умолчанию включена)
         import os
-        if os.environ.get("SURFH2_AUTO_INSTALL_SPACY", "0") == "1":
+        auto_install = os.environ.get("SURFH2_AUTO_INSTALL_SPACY", "1") != "0"
+        
+        if auto_install:
             try:
-                logger.info("spaCy model en_core_web_sm не найдена. Пытаюсь установить...")
-                from spacy.cli import download as spacy_download
-                spacy_download("en_core_web_sm")
-                nlp = spacy.load("en_core_web_sm")
-                logger.info("spaCy model en_core_web_sm успешно установлена и загружена")
+                logger.info("spaCy model en_core_web_sm не найдена. Устанавливаю автоматически...")
+                import subprocess
+                import sys
+                
+                # Используем subprocess для установки через spacy download
+                result = subprocess.run([
+                    sys.executable, '-m', 'spacy', 'download', 'en_core_web_sm'
+                ], capture_output=True, text=True, timeout=300)
+                
+                if result.returncode == 0:
+                    # Пробуем загрузить после установки
+                    import importlib
+                    importlib.reload(spacy)
+                    nlp = spacy.load("en_core_web_sm")
+                    logger.info("✅ spaCy model en_core_web_sm успешно установлена и загружена")
+                else:
+                    logger.error(f"Ошибка установки spaCy модели: {result.stderr}")
+                    logger.warning("Модель spaCy en_core_web_sm не найдена. Установите вручную: python -m spacy download en_core_web_sm")
             except Exception as e:
                 logger.warning(f"Не удалось автоматически установить spaCy модель: {e}")
+                logger.warning("Установите вручную: python -m spacy download en_core_web_sm")
         else:
-            logger.warning("Модель spaCy en_core_web_sm не найдена. Установите: python -m spacy download en_core_web_sm")
+            logger.warning("Автоустановка отключена. Модель spaCy en_core_web_sm не найдена. Установите: python -m spacy download en_core_web_sm")
 
-# Инициализация NLTK
+# Инициализация NLTK с автоматической установкой
 if NLTK_AVAILABLE:
+    import os  # для переменных окружения
+    missing_nltk_data = []
+    
+    # Проверяем punkt
     try:
         nltk.data.find('tokenizers/punkt')
     except LookupError:
-        try:
-            nltk.download('punkt', quiet=True)
-            nltk.download('stopwords', quiet=True)
-        except Exception as e:
-            logger.warning(f"Не удалось загрузить NLTK данные: {e}")
+        missing_nltk_data.append('punkt')
+    
+    # Проверяем stopwords
+    try:
+        nltk.data.find('corpora/stopwords')
+    except LookupError:
+        missing_nltk_data.append('stopwords')
+    
+    # Устанавливаем недостающие данные
+    if missing_nltk_data:
+        auto_install = os.environ.get("SURFH2_AUTO_INSTALL_NLTK", "1") != "0"
+        
+        if auto_install:
+            logger.info(f"NLTK данные не найдены: {missing_nltk_data}. Устанавливаю автоматически...")
+            try:
+                for dataset in missing_nltk_data:
+                    nltk.download(dataset, quiet=True)
+                logger.info("✅ NLTK данные успешно установлены")
+            except Exception as e:
+                logger.warning(f"Не удалось загрузить NLTK данные: {e}")
+        else:
+            logger.warning(f"Автоустановка NLTK отключена. Данные не найдены: {missing_nltk_data}")
+            logger.warning("Установите вручную: python -c \"import nltk; nltk.download('punkt'); nltk.download('stopwords')\"")
 
 class AIVulnerabilityParser:
     def __init__(self):
@@ -255,8 +293,8 @@ class AIVulnerabilityParser:
                 vulnerabilities = self._parse_nuclei_output(scanner_output)
             elif scanner_name == 'nikto':
                 vulnerabilities = self._parse_nikto_output(scanner_output)
-            elif scanner_name == 'wapiti':
-                vulnerabilities = self._parse_wapiti_output(scanner_output)
+            # elif scanner_name == 'wapiti':  # УДАЛЕНО: Wapiti больше не используется
+            #     vulnerabilities = self._parse_wapiti_output(scanner_output)
             elif scanner_name == 'nmap':
                 vulnerabilities = self._parse_nmap_output(scanner_output)
             elif scanner_name == 'gobuster':
@@ -395,44 +433,45 @@ class AIVulnerabilityParser:
         
         return vulnerabilities
     
-    def _parse_wapiti_output(self, output: Dict) -> List[Dict]:
-        """
-        Парсит вывод Wapiti
-        """
-        vulnerabilities = []
-        
-        try:
-            # Получаем список уязвимостей из структуры
-            vuln_list = []
-            if isinstance(output, dict):
-                vuln_list = output.get('vulnerabilities', [])
-                target = output.get('target', 'Unknown')
-            else:
-                vuln_list = output if isinstance(output, list) else []
-                target = 'Unknown'
-            
-            for vuln in vuln_list:
-                if isinstance(vuln, dict):
-                    # Извлекаем информацию
-                    resource = vuln.get('resource', target)
-                    description = vuln.get('description', '')
-                    severity = vuln.get('severity', 'Medium')
-                    
-                    # Определяем тип уязвимости
-                    vuln_type = self.extract_vulnerability_type(description)
-                    
-                    vulnerabilities.append({
-                        'resource': resource,
-                        'vulnerability_type': vuln_type,
-                        'description': description,
-                        'severity': severity,
-                        'scanner': 'wapiti'
-                    })
-                    
-        except Exception as e:
-            logger.error(f"Ошибка парсинга Wapiti: {e}")
-        
-        return vulnerabilities
+    # УДАЛЕНО: Wapiti больше не используется
+    # def _parse_wapiti_output(self, output: Dict) -> List[Dict]:
+    #     """
+    #     Парсит вывод Wapiti
+    #     """
+    #     vulnerabilities = []
+    #     
+    #     try:
+    #         # Получаем список уязвимостей из структуры
+    #         vuln_list = []
+    #         if isinstance(output, dict):
+    #             vuln_list = output.get('vulnerabilities', [])
+    #             target = output.get('target', 'Unknown')
+    #         else:
+    #             vuln_list = output if isinstance(output, list) else []
+    #             target = 'Unknown'
+    #         
+    #         for vuln in vuln_list:
+    #             if isinstance(vuln, dict):
+    #                 # Извлекаем информацию
+    #                 resource = vuln.get('resource', target)
+    #                 description = vuln.get('description', '')
+    #                 severity = vuln.get('severity', 'Medium')
+    #                 
+    #                 # Определяем тип уязвимости
+    #                 vuln_type = self.extract_vulnerability_type(description)
+    #                 
+    #                 vulnerabilities.append({
+    #                     'resource': resource,
+    #                     'vulnerability_type': vuln_type,
+    #                     'description': description,
+    #                     'severity': severity,
+    #                     'scanner': 'wapiti'
+    #                 })
+    #                 
+    #     except Exception as e:
+    #         logger.error(f"Ошибка парсинга Wapiti: {e}")
+    #     
+    #     return vulnerabilities
     
     def _parse_nmap_output(self, output: Dict) -> List[Dict]:
         """

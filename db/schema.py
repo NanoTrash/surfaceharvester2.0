@@ -75,21 +75,27 @@ def create_indexes(cursor):
         "CREATE INDEX IF NOT EXISTS idx_exploits_severity ON exploits(severity_score DESC)",
         "CREATE INDEX IF NOT EXISTS idx_exploits_language ON exploits(language)",
         
-        "CREATE INDEX IF NOT EXISTS idx_cve_cache_cve_id ON cvecache(cve_id)",
-        "CREATE INDEX IF NOT EXISTS idx_cve_cache_last_checked ON cvecache(last_checked)",
-        "CREATE INDEX IF NOT EXISTS idx_cve_cache_stale ON cvecache(is_stale)",
+        "CREATE INDEX IF NOT EXISTS idx_cvecache_cve_id ON cvecache(cve_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cvecache_last_checked ON cvecache(last_checked)",
+        "CREATE INDEX IF NOT EXISTS idx_cvecache_stale ON cvecache(is_stale)",
         
-        "CREATE INDEX IF NOT EXISTS idx_cve_processing_vulnerability_id ON cveprocessing(vulnerability_id)",
-        "CREATE INDEX IF NOT EXISTS idx_cve_processing_cve_id ON cveprocessing(cve_id)",
-        "CREATE INDEX IF NOT EXISTS idx_cve_processing_status ON cveprocessing(status)",
-        "CREATE INDEX IF NOT EXISTS idx_cve_processing_last_processed ON cveprocessing(last_processed)",
+        "CREATE INDEX IF NOT EXISTS idx_cveprocessing_vulnerability_id ON cveprocessing(vulnerability_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cveprocessing_cve_id ON cveprocessing(cve_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cveprocessing_status ON cveprocessing(status)",
+        "CREATE INDEX IF NOT EXISTS idx_cveprocessing_last_processed ON cveprocessing(last_processed)",
     ]
     
     for index_sql in indexes:
         try:
             cursor.execute(index_sql)
         except Exception as e:
-            print(f"[WARNING] Не удалось создать индекс: {e}")
+            # Игнорируем ошибки для несуществующих таблиц/колонок
+            error_msg = str(e).lower()
+            if 'no such table' in error_msg or 'no such column' in error_msg:
+                # Это нормально - таблица/колонка может не существовать в старых БД
+                continue
+            else:
+                print(f"[WARNING] Не удалось создать индекс: {e}")
     
     print("[INFO] Индексы созданы")
 

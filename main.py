@@ -8,7 +8,7 @@ import tempfile
 
 from db.schema import setup_database
 from db.report import show_report
-from scanner.wapiti import run_wapiti, process_wapiti_result
+# from scanner.wapiti import run_wapiti, process_wapiti_result  # УДАЛЕНО: Wapiti больше не используется
 from scanner.nuclei import run_nuclei, process_nuclei_result
 
 
@@ -63,10 +63,11 @@ def main():
 
         try:
             # Запуск сканеров
-            wapiti_data = run_wapiti(target, temp_dir)
-            if wapiti_data:
-                process_wapiti_result(wapiti_data, cursor, session_id, target)
-                conn.commit()
+            # WAPITI УДАЛЕН - был нестабильным
+            # wapiti_data = run_wapiti(target, temp_dir)
+            # if wapiti_data:
+            #     process_wapiti_result(wapiti_data, cursor, session_id, target)
+            #     conn.commit()
 
             nuclei_data = run_nuclei(target)
             if nuclei_data:

@@ -135,8 +135,7 @@ tmp/
 scanner_*/
 *.tmp
 
-# Wapiti reports (can contain sensitive data)
-wapiti_reports/
+# УДАЛЕНО: wapiti_reports/ (Wapiti больше не используется)
 
 # IDE
 .vscode/
@@ -161,3 +160,12 @@ Thumbs.db
 *.p12
 secrets.json
 config.local.py
+
+# Python venv
+venv/
+testcve1/
+*.pyc
+__pycache__/
+
+# виртуальное окружение
+testcve1/

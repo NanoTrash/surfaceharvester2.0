@@ -12,7 +12,7 @@ import asyncio
 from db.schema import setup_database, insert_initial_data
 from db.report import show_report, show_summary, show_summary_report
 from db.report import list_targets
-from scanner.wapiti import run_wapiti, process_wapiti_result
+# from scanner.wapiti import run_wapiti, process_wapiti_result  # УДАЛЕНО: Wapiti больше не используется
 from scanner.nuclei import run_nuclei, process_nuclei_result
 from scanner.ai_parser import AIVulnerabilityParser
 from scanner.surface_harvester import SurfaceHarvester
@@ -43,7 +43,7 @@ def scan_target(target, db_file="scan_results.db", scanners=None):
     Сканирует указанную цель (устаревшая функция - используйте full_scan)
     """
     if scanners is None:
-        scanners = ['wapiti', 'nuclei']
+        scanners = ['nuclei']  # Убран wapiti - был нестабильным
     
     # Валидация target
     try:
@@ -75,12 +75,13 @@ def scan_target(target, db_file="scan_results.db", scanners=None):
         print(f"[INFO] Временная директория: {temp_dir}")
         
         try:
-            if 'wapiti' in scanners:
-                print("\n[WAPITI] Запуск Wapiti...")
-                wapiti_data = run_wapiti(target, temp_dir)
-                if wapiti_data:
-                    process_wapiti_result(wapiti_data, cursor, session_id, target)
-                    conn.commit()
+            # WAPITI УДАЛЕН - был нестабильным
+            # if 'wapiti' in scanners:
+            #     print("\n[WAPITI] Запуск Wapiti...")
+            #     wapiti_data = run_wapiti(target, temp_dir)
+            #     if wapiti_data:
+            #         process_wapiti_result(wapiti_data, cursor, session_id, target)
+            #         conn.commit()
             
             if 'nuclei' in scanners:
                 print("\n[NUCLEI] Запуск Nuclei...")
@@ -141,7 +142,7 @@ async def full_scan_target(target, db_file="scan_results.db", dir_wordlist=None,
                 
                 if not unique_subdomains:
                     print(f"[ERROR] Не найдено субдоменов для {parent_domain} в базе данных")
-                    print("[HINT] Сначала запустите сканирование без флагов субдоменов для поиска субдоменов")
+                    print("[HINT] Сначала запустите: poetry run python cli.py full-scan TARGET --dir-wordlist common.txt --fuzz-wordlist LFI-Jhaddix.txt")
                     return False
                 
                 print(f"[INFO] Найдено {len(unique_subdomains)} субдоменов в базе данных")
@@ -196,7 +197,7 @@ async def full_scan_target(target, db_file="scan_results.db", dir_wordlist=None,
         
         # Обычное сканирование основного домена
         print(f"[INFO] Начинаем ПОЛНОЕ сканирование: {target}")
-        print(f"[INFO] Доступные инструменты: nmap, wapiti, nuclei, subfinder, gobuster")
+        print(f"[INFO] Доступные инструменты: nmap, nuclei, subfinder, gobuster + vulnx (CVEmap) для эксплойтов")  # убран wapiti
         if dir_wordlist:
             print(f"[INFO] Словарь директорий: {dir_wordlist}")
         if fuzz_wordlist:
@@ -275,7 +276,7 @@ async def full_scan_target(target, db_file="scan_results.db", dir_wordlist=None,
             print("\n[SUBDOMAINS] Доступные субдомены:")
             for idx, sub in enumerate(unique_subdomains, 1):
                 print(f"  {idx}. {sub}")
-            print(f"\n[INFO] Все субдомены сохранены в БД. Используйте 'targets-scan' для повторного сканирования.")
+            print(f"\n[INFO] Все субдомены сохранены в БД. Используйте 'poetry run python cli.py targets-scan' для повторного сканирования.")
 
             # Непосредственный выбор через флаги CLI
             if subdomains_all or (subdomains_select and subdomains_select.strip()):
@@ -383,9 +384,9 @@ async def full_scan_target(target, db_file="scan_results.db", dir_wordlist=None,
                 else:
                     print("[DEBUG] Пользователь выбрал НЕ запускать сканирование субдоменов")
                     print("[HINT] Для автоматического сканирования субдоменов используйте:")
-                    print("  --subdomains-all                   # сканировать все субдомены")
-                    print("  --subdomains-select '1,3,5'        # сканировать выбранные номера")
-                    print("  --subdomains-select 'test.site.com' # сканировать конкретные домены")
+                    print("  poetry run python cli.py full-scan TARGET --dir-wordlist common.txt --fuzz-wordlist LFI-Jhaddix.txt --subdomains-all")
+                    print("  poetry run python cli.py full-scan TARGET --dir-wordlist common.txt --fuzz-wordlist LFI-Jhaddix.txt --subdomains-select '1,3,5'")
+                    print("  poetry run python cli.py full-scan TARGET --dir-wordlist common.txt --fuzz-wordlist LFI-Jhaddix.txt --subdomains-select 'test.site.com'")
 
         return True
         
@@ -627,16 +628,21 @@ def handle_exploits_command(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Инструмент для автоматизированного сканирования уязвимостей и сбора информации о поверхности с использованием AI-парсинга результатов",
+        description="Инструмент для автоматизированного сканирования уязвимостей и сбора информации о поверхности с использованием AI-парсинга результатов + поиск эксплойтов через vulnx/CVEmap",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Примеры использования:
-  %(prog)s full-scan http://example.com
-  %(prog)s full-scan http://example.com --dir-wordlist /path/to/dir.txt --fuzz-wordlist /path/to/fuzz.txt
-  %(prog)s scan http://example.com --scanners wapiti,nuclei
-  %(prog)s surface example.com --dir-wordlist /path/to/dir.txt --fuzz-wordlist /path/to/fuzz.txt
-  %(prog)s report --target http://example.com
-  %(prog)s sessions
+  poetry run python %(prog)s full-scan http://example.com --dir-wordlist common.txt --fuzz-wordlist LFI-Jhaddix.txt
+  poetry run python %(prog)s scan http://example.com --scanners nuclei
+  poetry run python %(prog)s surface example.com --dir-wordlist common.txt --fuzz-wordlist LFI-Jhaddix.txt
+  poetry run python %(prog)s report --target http://example.com
+  poetry run python %(prog)s sessions
+
+Поиск эксплойтов (vulnx/CVEmap):
+  poetry run python %(prog)s exploits search --limit 10        # поиск последних эксплойтов 
+  poetry run python %(prog)s exploits status                   # статус обработки CVE
+  poetry run python %(prog)s exploits report                   # отчет по найденным эксплойтам
+  poetry run python %(prog)s exploits monitor --interval 60    # мониторинг новых CVE
         """
     )
     
@@ -653,14 +659,14 @@ def main():
     full_scan_parser.add_argument('--subdomains-select', help='Сканировать выбранные субдомены (номера через запятую или имена)')
     
     # Информация о доступных инструментах
-    print("[INFO] Доступные инструменты: nmap, wapiti, nuclei, subfinder, gobuster")
+    print("[INFO] Доступные инструменты: nmap, nuclei, subfinder, gobuster + vulnx (CVEmap) для эксплойтов")  # убран wapiti
     
     # Команда scan (уязвимости - устаревшая)
     scan_parser = subparsers.add_parser('scan', help='Сканировать уязвимости (устаревшая команда)')
     scan_parser.add_argument('target', help='Целевой URL')
     scan_parser.add_argument('--db', default='scan_results.db', help='Файл базы данных')
-    scan_parser.add_argument('--scanners', default='wapiti,nuclei', 
-                           help='Список сканеров (через запятую)')
+    scan_parser.add_argument('--scanners', default='nuclei', 
+                           help='Список сканеров (через запятую): nuclei')
     
     # Команда surface (сбор информации о поверхности)
     surface_parser = subparsers.add_parser('surface', help='Сканировать поверхность (порты, директории, субдомены)')
@@ -700,28 +706,28 @@ def main():
     targets_scan_parser.add_argument('--fuzz-wordlist', help='Путь к словарю для gobuster fuzz')
     targets_scan_parser.add_argument('--subdomains', action='store_true', help='Выбирать только субдомены')
 
-    # Команда exploits - поиск эксплойтов через vulnx
-    exploits_parser = subparsers.add_parser('exploits', help='Поиск эксплойтов для уязвимостей')
-    exploits_subparsers = exploits_parser.add_subparsers(dest='exploits_command', help='Команды для работы с эксплойтами')
+    # Команда exploits - поиск эксплойтов через vulnx/CVEmap
+    exploits_parser = subparsers.add_parser('exploits', help='Поиск эксплойтов через vulnx/CVEmap для найденных уязвимостей')
+    exploits_subparsers = exploits_parser.add_subparsers(dest='exploits_command', help='Команды vulnx/CVEmap для поиска эксплойтов')
     
     # Подкоманда search
-    exploits_search_parser = exploits_subparsers.add_parser('search', help='Поиск эксплойтов для pending уязвимостей')
+    exploits_search_parser = exploits_subparsers.add_parser('search', help='Поиск эксплойтов через vulnx для найденных CVE')
     exploits_search_parser.add_argument('--db', default='scan_results.db', help='Путь к базе данных')
     exploits_search_parser.add_argument('--limit', type=int, default=50, help='Лимит обработки уязвимостей')
     exploits_search_parser.add_argument('--target', help='Поиск только для конкретной цели')
     
     # Подкоманда monitor
-    exploits_monitor_parser = exploits_subparsers.add_parser('monitor', help='Мониторинг новых CVE')
+    exploits_monitor_parser = exploits_subparsers.add_parser('monitor', help='Мониторинг новых CVE и автопоиск эксплойтов')
     exploits_monitor_parser.add_argument('--db', default='scan_results.db', help='Путь к базе данных')
     exploits_monitor_parser.add_argument('--interval', type=int, default=60, help='Интервал проверки (секунды)')
     exploits_monitor_parser.add_argument('--daemon', action='store_true', help='Запуск в фоне')
     
     # Подкоманда status
-    exploits_status_parser = exploits_subparsers.add_parser('status', help='Статус обработки CVE')
+    exploits_status_parser = exploits_subparsers.add_parser('status', help='Статус обработки CVE и найденных эксплойтов')
     exploits_status_parser.add_argument('--db', default='scan_results.db', help='Путь к базе данных')
     
     # Подкоманда report
-    exploits_report_parser = exploits_subparsers.add_parser('report', help='Отчёт по найденным эксплойтам')
+    exploits_report_parser = exploits_subparsers.add_parser('report', help='Подробный отчёт по найденным эксплойтам и CVE')
     exploits_report_parser.add_argument('--db', default='scan_results.db', help='Путь к базе данных')
     exploits_report_parser.add_argument('--target', help='Отчёт только для конкретной цели')
     exploits_report_parser.add_argument('--cve', help='Отчёт только для конкретного CVE')
@@ -745,7 +751,11 @@ def main():
             ))
             if success:
                 print("\nДля просмотра отчета выполните:")
-                print(f"  {sys.argv[0]} report --target {args.target}")
+                print(f"  poetry run python {sys.argv[0]} report --target {args.target}")
+                print("\nДля поиска эксплойтов для найденных CVE выполните:")
+                print(f"  poetry run python {sys.argv[0]} exploits search --limit 10   # поиск последних эксплойтов")
+                print(f"  poetry run python {sys.argv[0]} exploits status             # статус CVE обработки")  
+                print(f"  poetry run python {sys.argv[0]} exploits report             # отчет по найденным эксплойтам")
             return 0 if success else 1
         
         elif args.command == 'scan':
@@ -753,7 +763,11 @@ def main():
             success = scan_target(args.target, args.db, scanners)
             if success:
                 print("\nДля просмотра отчета выполните:")
-                print(f"  {sys.argv[0]} report --target {args.target}")
+                print(f"  poetry run python {sys.argv[0]} report --target {args.target}")
+                print("\nДля поиска эксплойтов для найденных CVE выполните:")
+                print(f"  poetry run python {sys.argv[0]} exploits search --limit 10   # поиск последних эксплойтов")
+                print(f"  poetry run python {sys.argv[0]} exploits status             # статус CVE обработки")  
+                print(f"  poetry run python {sys.argv[0]} exploits report             # отчет по найденным эксплойтам")
             return 0 if success else 1
         
         elif args.command == 'surface':

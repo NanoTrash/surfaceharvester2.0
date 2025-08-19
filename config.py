@@ -18,7 +18,7 @@ DANGEROUS_CHARS = [';', '&', '|', '`', '$', '(', ')', '{', '}', '[', ']']
 # Настройки сканирования
 MAX_SCAN_TIMEOUT = 300  # 5 минут
 MAX_CONCURRENT_SCANS = 3
-DEFAULT_SCANNERS = ['wapiti', 'nuclei']
+DEFAULT_SCANNERS = ['nuclei']  # Убран wapiti - был нестабильным
 
 # Настройки файлов
 TEMP_DIR = os.getenv('SURFACEHARVESTER_TEMP_DIR', tempfile.gettempdir())

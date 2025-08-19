@@ -77,7 +77,7 @@ def setup_component_loggers():
     # Логгеры для сканеров
     scanner_loggers = [
         'scanner.nuclei',
-        'scanner.wapiti', 
+        # 'scanner.wapiti',  # УДАЛЕНО: Wapiti больше не используется 
         'scanner.nmap',
         'scanner.gobuster',
         'scanner.full_scanner'

@@ -15,7 +15,7 @@ import threading
 import signal
 import sys
 
-from vulnx_processor import VulnXProcessor
+from .vulnx_processor import VulnXProcessor
 
 logger = logging.getLogger(__name__)
 
