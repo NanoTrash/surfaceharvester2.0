@@ -1,4 +1,4 @@
-# SurfaceHarvester 2 — Инструмент для поверхностного анализа безопасности
+# SurfaceHarvester 2 — Инструмент для сбора поверхности атаки
 
 Инструмент для комплексного сканирования веб-приложений и сетевых сервисов с использованием нескольких сканеров безопасности и AI-парсинга, с сохранением результатов в SQLite.
 
@@ -32,7 +32,7 @@ python reports.py 6                    # Эксплойты и CVE
   poetry run python cli.py init --db scan_results.db
   ```
 
-- **Полный скан** (nmap, wapiti, nuclei, subfinder, gobuster; с интерактивным выбором субдоменов для повторных сканов):
+- **Полный скан** (nmap, nuclei, subfinder, gobuster, vulnx(CVEmap); с интерактивным выбором субдоменов для повторных сканов):
   ```bash
   poetry run python cli.py full-scan http://example.com \
     --db scan_results.db \
@@ -170,7 +170,6 @@ poetry run python cli.py exploits monitor --interval 60 --daemon
 ### Сканеры безопасности
 - **Nmap** - сканирование портов и извлечение уязвимостей через vulners
 - **Nuclei** - шаблонное сканирование с обширной базой шаблонов
-- **Wapiti** - веб-уязвимости (запуск через Docker)
 - **Subfinder** - поиск субдоменов
 - **Gobuster** - перебор директорий и параметров
 - **Contacts** - извлечение email/телефонов со страниц
@@ -201,11 +200,10 @@ poetry run python cli.py exploits monitor --interval 60 --daemon
 ### Пайплайн полного скана
 1. **Nmap** - скан портов и извлечение уязвимостей (vulners)
 2. **Contacts** - извлечение email/телефонов со стартовой страницы
-3. **Wapiti** (Docker) - веб-уязвимости
-4. **Nuclei** - шаблонное сканирование
-5. **Subfinder** - поиск субдоменов
-6. **Gobuster** - перебор директорий и параметров
-7. **AI-парсинг** - анализ и классификация всех результатов
+3. **Nuclei** - шаблонное сканирование
+4. **Subfinder** - поиск субдоменов
+5. **Gobuster** - перебор директорий и параметров
+6. **AI-парсинг** - анализ и классификация всех результатов
 
 ### Хранение данных
 - **Таблица `host`**: хосты, IP-адреса, типы, родительские домены
@@ -226,12 +224,12 @@ poetry run python cli.py exploits monitor --interval 60 --daemon
 
 - **Python 3.9+**
 - **Poetry** (менеджер зависимостей)
-- **Docker** (для Wapiti)
 - **Инструменты сканирования**:
   - `nmap` - сканирование портов
   - `nuclei` - шаблонное сканирование
   - `subfinder` - поиск субдоменов
   - `gobuster` - перебор директорий
+  - `vulnx` - CVE PoC's
 
 ### Пошаговая установка
 
@@ -301,9 +299,6 @@ poetry run python cli.py --help
 ### Переменные окружения
 
 ```bash
-# Docker образ для Wapiti (по умолчанию: cyberwatch/wapiti)
-export SURFH2_WAPITI_DOCKER_IMAGE=cyberwatch/wapiti
-
 # Авто-установка spaCy модели при первом запуске
 export SURFH2_AUTO_INSTALL_SPACY=1
 
@@ -313,13 +308,6 @@ export SURFH2_DB_PATH=scan_results.db
 # Уровень логирования (DEBUG, INFO, WARNING, ERROR)
 export SURFH2_LOG_LEVEL=INFO
 ```
-
-### Wapiti через Docker
-
-- Локальная установка Wapiti не требуется
-- Сканер запускается в контейнере Docker (`cyberwatch/wapiti`)
-- HTML-отчёт автоматически монтируется и преобразуется в единый формат
-- Образ можно переопределить переменной `SURFH2_WAPITI_DOCKER_IMAGE`
 
 ### Структура проекта
 
@@ -414,16 +402,6 @@ which nmap nuclei subfinder gobuster
 # Если не установлены, выполните установку заново
 sudo apt install nmap gobuster  # Ubuntu/Debian
 brew install nmap gobuster      # macOS
-```
-
-**Ошибка: "Docker not found"**
-```bash
-# Установка Docker
-sudo apt install docker.io      # Ubuntu/Debian
-brew install docker            # macOS
-
-# Добавление пользователя в группу docker
-sudo usermod -aG docker $USER
 ```
 
 **Ошибка: "spaCy model not found"**
