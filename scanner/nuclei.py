@@ -5,6 +5,9 @@ import json
 import shlex
 import logging
 from scanner.ai_parser import AIVulnerabilityParser
+import time
+import select
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -50,20 +53,60 @@ def run_nuclei(target):
         cmd = ['nuclei', '-u', target, '-jsonl', '-silent']
         logger.info(f"Запуск nuclei: {' '.join(cmd)}")
         
-        result = subprocess.run(cmd, 
-                              capture_output=True, 
-                              text=True, 
-                              timeout=300,  # 5 минут
-                              check=False)
-        
-        if result.returncode != 0:
-            logger.warning(f"Nuclei завершился с кодом {result.returncode}")
-            if result.stderr:
-                logger.warning(f"Nuclei stderr: {result.stderr}")
-        
-        # Парсим JSONL (каждая строка - отдельный JSON)
+        # Потоковый запуск с мониторингом неактивности
+        hard_timeout = int(os.environ.get('SURFH2_NUCLEI_TIMEOUT', '3000'))
+        inactivity_limit = int(os.environ.get('SURFH2_NUCLEI_INACTIVITY_SECONDS', '1200'))
+        start_time = time.time()
+        last_active = time.time()
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        lines = []
+        try:
+            while True:
+                if proc.stdout is None:
+                    break
+                rlist, _, _ = select.select([proc.stdout], [], [], 1.0)
+                if rlist:
+                    line = proc.stdout.readline()
+                    if not line:
+                        if proc.poll() is not None:
+                            break
+                        continue
+                    lines.append(line)
+                    last_active = time.time()
+                else:
+                    now = time.time()
+                    if now - start_time > hard_timeout:
+                        logger.warning(f"Nuclei превысил общий таймаут {hard_timeout}s. Прерываю...")
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                        break
+                    if now - last_active > inactivity_limit:
+                        logger.warning(f"Nuclei не выводит данных более {inactivity_limit}s. Прерываю...")
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                        break
+                if proc.poll() is not None:
+                    try:
+                        remaining = proc.stdout.read() if proc.stdout else ''
+                        if remaining:
+                            lines.append(remaining)
+                    except Exception:
+                        pass
+                    break
+        finally:
+            try:
+                if proc.stdout:
+                    proc.stdout.close()
+            except Exception:
+                pass
+
+        # Парсим JSONL
         findings = []
-        for line in result.stdout.strip().split('\n'):
+        for line in ''.join(lines).strip().split('\n'):
             if line.strip():
                 try:
                     finding = json.loads(line)

@@ -47,7 +47,19 @@ if SPACY_AVAILABLE:
     try:
         nlp = spacy.load("en_core_web_sm")
     except OSError:
-        logger.warning("Модель spaCy en_core_web_sm не найдена. Установите: python -m spacy download en_core_web_sm")
+        # Автоматическая установка модели при разрешении через ENV
+        import os
+        if os.environ.get("SURFH2_AUTO_INSTALL_SPACY", "0") == "1":
+            try:
+                logger.info("spaCy model en_core_web_sm не найдена. Пытаюсь установить...")
+                from spacy.cli import download as spacy_download
+                spacy_download("en_core_web_sm")
+                nlp = spacy.load("en_core_web_sm")
+                logger.info("spaCy model en_core_web_sm успешно установлена и загружена")
+            except Exception as e:
+                logger.warning(f"Не удалось автоматически установить spaCy модель: {e}")
+        else:
+            logger.warning("Модель spaCy en_core_web_sm не найдена. Установите: python -m spacy download en_core_web_sm")
 
 # Инициализация NLTK
 if NLTK_AVAILABLE:
@@ -249,12 +261,57 @@ class AIVulnerabilityParser:
                 vulnerabilities = self._parse_nmap_output(scanner_output)
             elif scanner_name == 'gobuster':
                 vulnerabilities = self._parse_gobuster_output(scanner_output)
+            elif scanner_name == 'contacts':
+                vulnerabilities = self._parse_contacts_output(scanner_output)
             else:
                 vulnerabilities = self._parse_generic_output(scanner_output, scanner_name)
         except Exception as e:
             logger.error(f"Ошибка парсинга вывода {scanner_name}: {e}")
             return []
         
+        return vulnerabilities
+
+    def _parse_contacts_output(self, output: Dict) -> List[Dict]:
+        """
+        Парсит результаты извлечения контактов (emails, phones)
+        Ожидаемый формат:
+        {
+            'emails': [...],
+            'phones': [...],
+            'target': 'http://example.com'
+        }
+        """
+        vulnerabilities: List[Dict] = []
+        if not isinstance(output, dict):
+            logger.warning("Contacts output не является dict")
+            return vulnerabilities
+        target = output.get('target', 'Unknown')
+        emails = output.get('emails') or []
+        phones = output.get('phones') or []
+        
+        logger.info(f"Contacts парсер: найдено {len(emails)} email и {len(phones)} телефонов для {target}")
+        for em in emails:
+            try:
+                vulnerabilities.append({
+                    'resource': target,
+                    'vulnerability_type': 'Contact: Email',
+                    'description': f"Email found: {em}",
+                    'severity': 'Info',
+                    'scanner': 'contacts'
+                })
+            except Exception:
+                continue
+        for ph in phones:
+            try:
+                vulnerabilities.append({
+                    'resource': target,
+                    'vulnerability_type': 'Contact: Phone',
+                    'description': f"Phone found: {ph}",
+                    'severity': 'Info',
+                    'scanner': 'contacts'
+                })
+            except Exception:
+                continue
         return vulnerabilities
 
     def _parse_nuclei_output(self, output: List[Dict]) -> List[Dict]:
@@ -387,6 +444,8 @@ class AIVulnerabilityParser:
             nmap_text = output.get('output', '') if isinstance(output, dict) else str(output)
             target = output.get('target', 'Unknown') if isinstance(output, dict) else 'Unknown'
             
+            logger.info(f"Nmap парсер: анализирую {len(nmap_text)} символов вывода для {target}")
+            
             lines = nmap_text.split('\n')
             
             for line in lines:
@@ -428,6 +487,7 @@ class AIVulnerabilityParser:
         except Exception as e:
             logger.error(f"Ошибка парсинга Nmap: {e}")
         
+        logger.info(f"Nmap парсер нашёл {len(vulnerabilities)} уязвимостей для {target}")
         return vulnerabilities
     
     def _parse_gobuster_output(self, output: Dict) -> List[Dict]:

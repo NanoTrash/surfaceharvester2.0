@@ -11,10 +11,10 @@ def setup_database(cursor):
     for model in MODEL_REGISTRY.values():
         model.create_table(cursor)
     
-    # Создаем индексы для оптимизации запросов
-    create_indexes(cursor)
-    # Миграции для существующих таблиц
+    # Сначала миграции для существующих таблиц
     migrate_schema(cursor)
+    # Затем создаем индексы для оптимизации запросов
+    create_indexes(cursor)
     
     print("[INFO] База данных инициализирована")
 
@@ -106,6 +106,22 @@ def migrate_schema(cursor):
                     cursor.execute(f"ALTER TABLE host ADD COLUMN {col} {ddl}")
                 except Exception as e:
                     print(f"[WARNING] Не удалось добавить колонку host.{col}: {e}")
+
+        # scanresult: scanner
+        sr_cols = _table_columns(cursor, 'scanresult')
+        if 'scanner' not in sr_cols and sr_cols:
+            try:
+                cursor.execute("ALTER TABLE scanresult ADD COLUMN scanner TEXT")
+            except Exception as e:
+                print(f"[WARNING] Не удалось добавить колонку scanresult.scanner: {e}")
+
+        # vulnerability: scanner (на случай очень старой схемы)
+        vuln_cols = _table_columns(cursor, 'vulnerability')
+        if 'scanner' not in vuln_cols and vuln_cols:
+            try:
+                cursor.execute("ALTER TABLE vulnerability ADD COLUMN scanner TEXT")
+            except Exception as e:
+                print(f"[WARNING] Не удалось добавить колонку vulnerability.scanner: {e}")
         # subdomain: если таблицы нет — создать
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='subdomain'")
         if cursor.fetchone() is None:

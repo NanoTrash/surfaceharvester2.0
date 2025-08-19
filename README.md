@@ -59,7 +59,7 @@
 - **Пайплайн полного скана**:
   - Nmap: скан портов и извлечение уязвимостей (vulners).
   - Извлечение контактов (email/телефоны) со стартовой страницы.
-  - Wapiti: веб-уязвимости; Nuclei: шаблонное сканирование.
+  - Wapiti (через Docker): веб-уязвимости; Nuclei: шаблонное сканирование.
   - Subfinder: поиск субдоменов.
   - Gobuster dir/fuzz: директории и параметры.
   - Все результаты уязвимостей проходят **AI-парсинг** и сохраняются в `vulnerability`.
@@ -80,27 +80,31 @@
 
 - Python 3.9+
 - Poetry
+- Docker (для Wapiti)
 - Инструменты системы:
-  - `nmap`, `wapiti`, `nuclei`, `subfinder`, `gobuster`
+  - `nmap`, `nuclei`, `subfinder`, `gobuster`
 
 ### Установка зависимостей
 
 ```bash
 # Клонирование репозитория
 git clone <repository-url>
-cd pntst
+cd surfaceharvester2.0
 
 # Установка зависимостей (без установки самого пакета)
 poetry install --no-root
 
-# (опционально) Установка spaCy модели для AI-парсинга
+# (рекомендуется) Установка spaCy модели для AI-парсинга
 poetry run python -m spacy download en_core_web_sm
+
+# (опционально) Авто-установка spaCy модели при первом запуске
+# export SURFH2_AUTO_INSTALL_SPACY=1
 ```
 
 ### Установка инструментов сканирования (Ubuntu/Debian)
 
 ```bash
-sudo apt update && sudo apt install -y nmap wapiti gobuster
+sudo apt update && sudo apt install -y nmap gobuster
 
 # Nuclei
 curl -sfL https://raw.githubusercontent.com/projectdiscovery/nuclei/master/v2/cmd/nuclei/install.sh | sh -s
@@ -125,3 +129,13 @@ poetry run python cli.py full-scan http://example.com \
 poetry run python cli.py targets-list --db scan_results.db --subdomains
 poetry run python cli.py targets-scan --db scan_results.db --dir-wordlist /path/to/dir_wordlist.txt --fuzz-wordlist /path/to/fuzz_wordlist.txt --subdomains
 ```
+
+## Wapiti через Docker
+
+- Локальная установка Wapiti не требуется. Сканер всегда запускается в контейнере Docker (`cyberwatch/wapiti`).
+- HTML-отчёт из контейнера автоматически монтируется во временную папку и преобразуется в единый формат уязвимостей для БД.
+- Образ можно переопределить переменной окружения:
+  ```bash
+  export SURFH2_WAPITI_DOCKER_IMAGE=cyberwatch/wapiti
+  ```
+  По умолчанию используется `cyberwatch/wapiti`.

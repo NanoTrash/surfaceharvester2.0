@@ -135,6 +135,9 @@ tmp/
 scanner_*/
 *.tmp
 
+# Wapiti reports (can contain sensitive data)
+wapiti_reports/
+
 # IDE
 .vscode/
 .idea/

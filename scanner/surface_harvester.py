@@ -157,18 +157,35 @@ class SurfaceHarvester:
                 except TypeError:
                     response = await response_ctx
                     text = await response.text()
-                    soup = BeautifulSoup(text, 'html.parser')
-                    
-                    # Поиск email адресов
-                    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', str(soup))
-                    emails = list(set(emails))  # Убираем дубликаты
-                    
-                    # Поиск телефонов
-                    phones = re.findall(r'\+\d[\d\s()+-]+', str(soup))
-                    phones = list(set(phones))  # Убираем дубликаты
-                    
-                    logger.info(f"Найдено {len(emails)} email и {len(phones)} телефонов на {url}")
-                    return emails, phones
+                soup = BeautifulSoup(text, 'html.parser')
+                
+                # Поиск email адресов
+                visible_text = soup.get_text(" ") if soup else text
+                emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', visible_text)
+                emails = list(set(emails))  # Убираем дубликаты
+                
+                # Поиск телефонов с нормализацией
+                def normalize_phones(raw_text: str) -> List[str]:
+                    candidates = re.findall(r'(\+?\d[\d\-\s\(\)]{6,}\d)', raw_text)
+                    normalized: List[str] = []
+                    for cand in candidates:
+                        c = cand.replace('\r', ' ').replace('\n', ' ')
+                        c = re.sub(r'[^0-9+]', '', c)
+                        if '+' in c and not c.startswith('+'):
+                            c = c.replace('+', '')
+                        if c.count('+') > 1:
+                            c = '+' + c.replace('+', '')
+                        digits = re.sub(r'\D', '', c)
+                        if len(digits) < 7 or len(digits) > 15:
+                            continue
+                        phone = ('+' + digits) if c.startswith('+') else digits
+                        normalized.append(phone)
+                    uniq = sorted(set(normalized), key=lambda x: (len(x), x))
+                    return uniq
+                phones = normalize_phones(visible_text)
+                
+                logger.info(f"Найдено {len(emails)} email и {len(phones)} телефонов на {url}")
+                return emails, phones
                     
         except Exception as e:
             logger.error(f"[Extract contacts error for {url}]: {e}")

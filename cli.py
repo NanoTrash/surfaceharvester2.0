@@ -120,11 +120,81 @@ def scan_target(target, db_file="scan_results.db", scanners=None):
     return True
 
 
-async def full_scan_target(target, db_file="scan_results.db", dir_wordlist=None, fuzz_wordlist=None):
+async def full_scan_target(target, db_file="scan_results.db", dir_wordlist=None, fuzz_wordlist=None, subdomains_all=False, subdomains_select=None):
     """
     Полное сканирование цели всеми доступными инструментами
     """
     try:
+        # Если указаны флаги субдоменов, сканируем только субдомены из БД
+        if subdomains_all or (subdomains_select and subdomains_select.strip()):
+            print(f"[INFO] Режим сканирования ТОЛЬКО СУБДОМЕНОВ для: {target}")
+            print(f"[INFO] Загружаем субдомены из базы данных...")
+            
+            # Загружаем субдомены из БД
+            try:
+                conn = sqlite3.connect(db_file)
+                cursor = conn.cursor()
+                parent_domain = target.replace('http://','').replace('https://','').split('/')[0]
+                cursor.execute("SELECT DISTINCT name FROM subdomain WHERE parent_domain = ? ORDER BY name", (parent_domain,))
+                unique_subdomains = [row[0] for row in cursor.fetchall()]
+                conn.close()
+                
+                if not unique_subdomains:
+                    print(f"[ERROR] Не найдено субдоменов для {parent_domain} в базе данных")
+                    print("[HINT] Сначала запустите сканирование без флагов субдоменов для поиска субдоменов")
+                    return False
+                
+                print(f"[INFO] Найдено {len(unique_subdomains)} субдоменов в базе данных")
+                print("\n[SUBDOMAINS] Доступные субдомены:")
+                for idx, sub in enumerate(unique_subdomains, 1):
+                    print(f"  {idx}. {sub}")
+                
+                # Выбираем субдомены согласно флагам
+                selected = []
+                seen = set(unique_subdomains)
+                
+                if subdomains_all:
+                    selected = unique_subdomains
+                    print(f"\n[INFO] Выбраны ВСЕ субдомены: {len(selected)}")
+                else:
+                    tokens = [t.strip() for t in subdomains_select.split(',') if t.strip()]
+                    for token in tokens:
+                        if token.isdigit():
+                            i = int(token)
+                            if 1 <= i <= len(unique_subdomains):
+                                selected.append(unique_subdomains[i - 1])
+                        else:
+                            if token in seen:
+                                selected.append(token)
+                    selected = list(dict.fromkeys(selected))  # убираем дубликаты
+                    print(f"\n[INFO] Выбраны субдомены: {selected}")
+                
+                if not selected:
+                    print("[ERROR] Не удалось выбрать субдомены")
+                    return False
+                
+                # Сканируем только выбранные субдомены
+                scanner = FullScanner()
+                print(f"\n[SUBDOMAIN SCAN] Запускаю сканирование {len(selected)} субдоменов...")
+                
+                for sub in selected:
+                    sub_target = f"http://{sub}"
+                    print(f"\n[SUBDOMAIN SCAN] Цель: {sub_target}")
+                    try:
+                        sub_scan = await scanner.full_scan(sub_target, db_file, dir_wordlist, fuzz_wordlist)
+                        print(f"[SUBDOMAIN SCAN] Сессия ID: {sub_scan['session_id']}")
+                        print(f"[SUCCESS] Субдомен {sub} просканирован успешно!")
+                    except Exception as e:
+                        print(f"[SUBDOMAIN SCAN][ERROR] {sub_target}: {e}")
+                
+                print(f"\n[SUCCESS] Сканирование субдоменов завершено!")
+                return True
+                
+            except Exception as e:
+                print(f"[ERROR] Ошибка работы с базой данных: {e}")
+                return False
+        
+        # Обычное сканирование основного домена
         print(f"[INFO] Начинаем ПОЛНОЕ сканирование: {target}")
         print(f"[INFO] Доступные инструменты: nmap, wapiti, nuclei, subfinder, gobuster")
         if dir_wordlist:
@@ -161,28 +231,59 @@ async def full_scan_target(target, db_file="scan_results.db", dir_wordlist=None,
                 if sub not in seen:
                     seen.add(sub)
                     unique_subdomains.append(sub)
+        
+        # Сохраняем субдомены в базу данных для дальнейшего использования
+        if unique_subdomains:
+            try:
+                conn = sqlite3.connect(db_file)
+                cursor = conn.cursor()
+                for sub in unique_subdomains:
+                    # Проверяем, есть ли уже такой субдомен
+                    cursor.execute("SELECT id FROM subdomain WHERE name = ?", (sub,))
+                    if not cursor.fetchone():
+                        # Создаем новый субдомен
+                        from db.models import Subdomain
+                        Subdomain.insert(cursor,
+                                       name=sub,
+                                       parent_domain=target.replace('http://','').replace('https://','').split('/')[0],
+                                       session_first_seen=scan_data['session_id'],
+                                       session_last_seen=scan_data['session_id'],
+                                       target=target,
+                                       source='subfinder')
+                conn.commit()
+                conn.close()
+                print(f"[INFO] Сохранено {len(unique_subdomains)} субдоменов в базу данных")
+            except Exception as e:
+                print(f"[WARNING] Не удалось сохранить субдомены: {e}")
+
+        # Если субдомены не найдены в текущем сканировании, проверим базу данных
+        if not unique_subdomains:
+            try:
+                conn = sqlite3.connect(db_file)
+                cursor = conn.cursor()
+                parent_domain = target.replace('http://','').replace('https://','').split('/')[0]
+                cursor.execute("SELECT DISTINCT name FROM subdomain WHERE parent_domain = ? ORDER BY name", (parent_domain,))
+                db_subdomains = [row[0] for row in cursor.fetchall()]
+                conn.close()
+                if db_subdomains:
+                    unique_subdomains = db_subdomains
+                    print(f"[INFO] Загружено {len(unique_subdomains)} субдоменов из базы данных для {parent_domain}")
+            except Exception as e:
+                print(f"[WARNING] Не удалось загрузить субдомены из БД: {e}")
 
         if unique_subdomains:
-            print("\n[SUBDOMAINS] Найдены субдомены:")
+            print("\n[SUBDOMAINS] Доступные субдомены:")
             for idx, sub in enumerate(unique_subdomains, 1):
                 print(f"  {idx}. {sub}")
+            print(f"\n[INFO] Все субдомены сохранены в БД. Используйте 'targets-scan' для повторного сканирования.")
 
-            try:
-                choice = input("\nЗапустить полные сканы для субдоменов? (y/N): ").strip().lower()
-            except EOFError:
-                choice = 'n'
-
-            if choice == 'y':
-                try:
-                    raw_sel = input("Укажите номера через запятую или имена субдоменов (или 'all'): ").strip()
-                except EOFError:
-                    raw_sel = ''
-
+            # Непосредственный выбор через флаги CLI
+            if subdomains_all or (subdomains_select and subdomains_select.strip()):
                 selected = []
-                if raw_sel.lower() == 'all':
+                if subdomains_all:
                     selected = unique_subdomains
                 else:
-                    tokens = [t.strip() for t in raw_sel.split(',') if t.strip()]
+                    tokens = [t.strip() for t in subdomains_select.split(',') if t.strip()]
                     for token in tokens:
                         if token.isdigit():
                             i = int(token)
@@ -191,10 +292,7 @@ async def full_scan_target(target, db_file="scan_results.db", dir_wordlist=None,
                         else:
                             if token in seen:
                                 selected.append(token)
-
-                # Убираем дубликаты, если пользователь указал и номер, и имя
                 selected = list(dict.fromkeys(selected))
-
                 if selected:
                     print(f"\n[CHAIN SCAN] Запускаю повторные полные сканы для {len(selected)} субдоменов...")
                     for sub in selected:
@@ -205,6 +303,89 @@ async def full_scan_target(target, db_file="scan_results.db", dir_wordlist=None,
                             print(f"[CHAIN SCAN] Сессия ID: {sub_scan['session_id']}")
                         except Exception as e:
                             print(f"[CHAIN SCAN][ERROR] {sub_target}: {e}")
+            else:
+                try:
+                    choice = input("\nЗапустить полные сканы для субдоменов? (y/N): ").strip().lower()
+                except EOFError:
+                    choice = 'n'
+
+                if choice == 'y':
+                    print("[DEBUG] Пользователь выбрал запуск сканирования субдоменов...")
+                    # Цикл выбора до тех пор, пока пользователь не выберет или не отменит
+                    input_errors = 0
+                    max_input_errors = 3
+                    
+                    while True:
+                        try:
+                            print(f"[DEBUG] Доступно {len(unique_subdomains)} субдоменов для выбора")
+                            raw_sel = input("Укажите номера через запятую или имена субдоменов (all | q=отмена): ").strip()
+                            print(f"[DEBUG] Пользователь ввел: '{raw_sel}'")
+                            input_errors = 0  # Сбрасываем счетчик при успешном вводе
+                        except EOFError:
+                            input_errors += 1
+                            print(f"[DEBUG] EOFError при получении ввода пользователя (ошибка {input_errors}/{max_input_errors})")
+                            if input_errors >= max_input_errors:
+                                print("[WARNING] Превышено количество ошибок ввода. Отмена выбора субдоменов.")
+                                break
+                            raw_sel = ''
+                        except KeyboardInterrupt:
+                            print("\n[DEBUG] KeyboardInterrupt - пользователь прервал ввод")
+                            break
+                        except Exception as e:
+                            input_errors += 1
+                            print(f"[DEBUG] Неожиданная ошибка при вводе: {e} (ошибка {input_errors}/{max_input_errors})")
+                            if input_errors >= max_input_errors:
+                                print("[WARNING] Превышено количество ошибок ввода. Отмена выбора субдоменов.")
+                                break
+                            raw_sel = ''
+
+                        if not raw_sel:
+                            if input_errors >= max_input_errors:
+                                break
+                            print("Ничего не введено. Введите номера (например: 1,3,5), 'all' или 'q' для отмены.")
+                            continue
+
+                        if raw_sel.lower() in ('q', 'quit', 'exit'):
+                            print("Отмена выбора субдоменов.")
+                            break
+
+                        selected = []
+                        if raw_sel.lower() == 'all':
+                            selected = unique_subdomains
+                        else:
+                            tokens = [t.strip() for t in raw_sel.split(',') if t.strip()]
+                            for token in tokens:
+                                if token.isdigit():
+                                    i = int(token)
+                                    if 1 <= i <= len(unique_subdomains):
+                                        selected.append(unique_subdomains[i - 1])
+                                else:
+                                    if token in seen:
+                                        selected.append(token)
+
+                        # Убираем дубликаты, если пользователь указал и номер, и имя
+                        selected = list(dict.fromkeys(selected))
+
+                        if not selected:
+                            print("Не распознал цели. Повторите ввод (или 'q' для отмены).")
+                            continue
+
+                        print(f"\n[CHAIN SCAN] Запускаю повторные полные сканы для {len(selected)} субдоменов...")
+                        for sub in selected:
+                            sub_target = f"http://{sub}"
+                            print(f"\n[CHAIN SCAN] Цель: {sub_target}")
+                            try:
+                                sub_scan = await scanner.full_scan(sub_target, db_file, dir_wordlist, fuzz_wordlist)
+                                print(f"[CHAIN SCAN] Сессия ID: {sub_scan['session_id']}")
+                            except Exception as e:
+                                print(f"[CHAIN SCAN][ERROR] {sub_target}: {e}")
+                        break
+                else:
+                    print("[DEBUG] Пользователь выбрал НЕ запускать сканирование субдоменов")
+                    print("[HINT] Для автоматического сканирования субдоменов используйте:")
+                    print("  --subdomains-all                   # сканировать все субдомены")
+                    print("  --subdomains-select '1,3,5'        # сканировать выбранные номера")
+                    print("  --subdomains-select 'test.site.com' # сканировать конкретные домены")
 
         return True
         
@@ -329,7 +510,7 @@ def main():
 Примеры использования:
   %(prog)s full-scan http://example.com
   %(prog)s full-scan http://example.com --dir-wordlist /path/to/dir.txt --fuzz-wordlist /path/to/fuzz.txt
-  %(prog)s scan http://example.com --scanners nikto,nuclei
+  %(prog)s scan http://example.com --scanners wapiti,nuclei
   %(prog)s surface example.com --dir-wordlist /path/to/dir.txt --fuzz-wordlist /path/to/fuzz.txt
   %(prog)s report --target http://example.com
   %(prog)s sessions
@@ -344,6 +525,9 @@ def main():
     full_scan_parser.add_argument('--db', default='scan_results.db', help='Путь к базе данных (по умолчанию: scan_results.db)')
     full_scan_parser.add_argument('--dir-wordlist', required=True, help='Путь к словарю для gobuster dir')
     full_scan_parser.add_argument('--fuzz-wordlist', required=True, help='Путь к словарю для gobuster fuzz')
+    # Неинтерактивный выбор субдоменов
+    full_scan_parser.add_argument('--subdomains-all', action='store_true', help='Сканировать все найденные субдомены')
+    full_scan_parser.add_argument('--subdomains-select', help='Сканировать выбранные субдомены (номера через запятую или имена)')
     
     # Информация о доступных инструментах
     print("[INFO] Доступные инструменты: nmap, wapiti, nuclei, subfinder, gobuster")
@@ -352,7 +536,7 @@ def main():
     scan_parser = subparsers.add_parser('scan', help='Сканировать уязвимости (устаревшая команда)')
     scan_parser.add_argument('target', help='Целевой URL')
     scan_parser.add_argument('--db', default='scan_results.db', help='Файл базы данных')
-    scan_parser.add_argument('--scanners', default='nikto,nuclei', 
+    scan_parser.add_argument('--scanners', default='wapiti,nuclei', 
                            help='Список сканеров (через запятую)')
     
     # Команда surface (сбор информации о поверхности)
@@ -405,7 +589,9 @@ def main():
                 args.target, 
                 args.db, 
                 args.dir_wordlist, 
-                args.fuzz_wordlist
+                args.fuzz_wordlist,
+                subdomains_all=args.subdomains_all,
+                subdomains_select=args.subdomains_select
             ))
             if success:
                 print("\nДля просмотра отчета выполните:")
