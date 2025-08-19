@@ -12,12 +12,14 @@ from typing import List, Dict, Tuple, Set
 from urllib.parse import urlparse
 import sqlite3
 from datetime import datetime
+import time
 
-from scanner.wapiti import run_wapiti, process_wapiti_result
+# from scanner.wapiti import run_wapiti, process_wapiti_result  # УДАЛЕНО: Wapiti больше не используется
 from scanner.nuclei import run_nuclei, process_nuclei_result
 from scanner.ai_parser import AIVulnerabilityParser
 from db.schema import setup_database
-from db.models import ScanSession, Vulnerability
+from db.models import ScanSession, Vulnerability, Host, Subdomain
+import socket
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +59,7 @@ class FullScanner:
             # Разные флаги для разных инструментов
             version_flags = {
                 'nmap': ['-V'],
-                'wapiti': ['--version'],
+                # 'wapiti': ['--version'],  # УДАЛЕНО: Wapiti больше не используется
                 'nuclei': ['-version'],
                 'subfinder': ['-version'],
                 'gobuster': ['version']
@@ -69,6 +71,110 @@ class FullScanner:
             return result.returncode == 0
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return False
+
+    def resolve_ip(self, hostname: str) -> str:
+        """Возвращает IPv4 адрес для хоста, если возможно"""
+        try:
+            return socket.gethostbyname(hostname)
+        except Exception:
+            return ""
+
+    def upsert_host(self, cursor, *, hostname: str = None, ip_address: str = None,
+                    session_id: int = None, target: str = None, host_type: str = 'domain',
+                    source: str = None, parent_domain: str = None, last_scanned_session_id: int = None):
+        """Создаёт или обновляет запись в host по hostname/ip"""
+        try:
+            if hostname:
+                cursor.execute("SELECT id FROM host WHERE hostname = ? LIMIT 1", (hostname,))
+                row = cursor.fetchone()
+                if row:
+                    update_fields = {}
+                    if ip_address:
+                        update_fields['ip_address'] = ip_address
+                    if session_id is not None:
+                        update_fields['session_id'] = session_id
+                    if target is not None:
+                        update_fields['target'] = target
+                    if host_type:
+                        update_fields['type'] = host_type
+                    if source:
+                        update_fields['source'] = source
+                    if parent_domain is not None:
+                        update_fields['parent_domain'] = parent_domain
+                    if last_scanned_session_id is not None:
+                        update_fields['last_scanned_session_id'] = last_scanned_session_id
+                    if update_fields:
+                        Host.update(cursor, row[0], **update_fields)
+                    return
+            if ip_address and not hostname:
+                cursor.execute("SELECT id FROM host WHERE ip_address = ? LIMIT 1", (ip_address,))
+                row = cursor.fetchone()
+                if row:
+                    update_fields = {}
+                    if session_id is not None:
+                        update_fields['session_id'] = session_id
+                    if target is not None:
+                        update_fields['target'] = target
+                    if host_type:
+                        update_fields['type'] = host_type
+                    if source:
+                        update_fields['source'] = source
+                    if parent_domain is not None:
+                        update_fields['parent_domain'] = parent_domain
+                    if last_scanned_session_id is not None:
+                        update_fields['last_scanned_session_id'] = last_scanned_session_id
+                    if update_fields:
+                        Host.update(cursor, row[0], **update_fields)
+                    return
+            # Создаём новую запись
+            Host.insert(cursor,
+                        hostname=hostname or '',
+                        ip_address=ip_address or '',
+                        session_id=session_id,
+                        target=target or '',
+                        type=host_type,
+                        source=source or '',
+                        parent_domain=parent_domain or '',
+                        last_scanned_session_id=last_scanned_session_id)
+        except Exception as e:
+            logger.warning(f"Не удалось upsert host {hostname or ip_address}: {e}")
+
+    def upsert_subdomain(self, cursor, *, name: str, parent_domain: str, session_id: int, target: str, source: str):
+        """Создаёт или обновляет запись в subdomain"""
+        try:
+            cursor.execute("SELECT id, session_first_seen, session_last_seen FROM subdomain WHERE name = ? LIMIT 1", (name,))
+            row = cursor.fetchone()
+            if row:
+                sub_id, first_seen, last_seen = row
+                update_fields = {
+                    'session_last_seen': session_id,
+                    'parent_domain': parent_domain,
+                    'target': target,
+                    'source': source
+                }
+                Subdomain.update(cursor, sub_id, **update_fields)
+                return sub_id
+            # Пробуем найти host.id
+            host_id = None
+            try:
+                cursor.execute("SELECT id FROM host WHERE hostname = ? LIMIT 1", (name,))
+                hr = cursor.fetchone()
+                if hr:
+                    host_id = hr[0]
+            except Exception:
+                pass
+            Subdomain.insert(cursor,
+                             name=name,
+                             parent_domain=parent_domain,
+                             host_id=host_id,
+                             session_first_seen=session_id,
+                             session_last_seen=session_id,
+                             target=target,
+                             source=source)
+            return cursor.lastrowid
+        except Exception as e:
+            logger.warning(f"Не удалось upsert subdomain {name}: {e}")
+            return None
     
     def run_nmap_scan(self, target):
         """
@@ -198,6 +304,9 @@ class FullScanner:
                     logger.info(f"Найдено {len(emails)} email и {len(phones)} телефонов на {url}")
                     return emails, phones
                     
+        except asyncio.CancelledError:
+            logger.warning(f"Извлечение контактов для {url} было прервано пользователем")
+            return [], []
         except Exception as e:
             logger.error(f"[Extract contacts error for {url}]: {e}")
             return [], []
@@ -334,83 +443,161 @@ class FullScanner:
             session_id = cursor.lastrowid
             conn.commit()
             
-            print(f"[INFO] Начинаем полное сканирование {target}")
-            print(f"[INFO] Сессия ID: {session_id}")
-            print(f"[INFO] Временная директория: {temp_dir}")
+            def _ts():
+                return datetime.now().strftime('%H:%M:%S')
+            print(f"[{_ts()}] [INFO] Начинаем полное сканирование {target}")
+            print(f"[{_ts()}] [INFO] Сессия ID: {session_id}")
+            print(f"[{_ts()}] [INFO] Временная директория: {temp_dir}")
             
             emails, phones, domains = [], [], set()
             all_results = []
             
-            is_ip = self.is_ip_address(target)
+            # Нормализуем целевой адрес для единообразия (добавляем http:// при отсутствии)
+            normalized_target = target.strip()
+            if not (normalized_target.startswith('http://') or normalized_target.startswith('https://')):
+                normalized_target = f"http://{normalized_target}"
+            
+            is_ip = self.is_ip_address(normalized_target.replace('http://','').replace('https://','').split('/')[0])
             
             try:
                 # 1. Nmap сканирование (всегда)
-                print("\n[NMAP] Запуск Nmap...")
-                nmap_result = self.run_nmap_scan(target)
-                self.save_nmap_vulnerabilities(nmap_result, cursor, session_id, target)
+                print(f"\n[{_ts()}] [NMAP] Запуск Nmap...")
+                _nmap_t0 = time.perf_counter()
+                nmap_result = self.run_nmap_scan(normalized_target)
+                self.save_nmap_vulnerabilities(nmap_result, cursor, session_id, normalized_target)
                 conn.commit()
+                print(f"[{_ts()}] [NMAP] Завершено за {time.perf_counter() - _nmap_t0:.2f}s")
                 
                 if is_ip:
+                    # Сохраняем IP цель в host
+                    self.upsert_host(cursor,
+                                     ip_address=normalized_target.replace('http://','').replace('https://',''),
+                                     session_id=session_id,
+                                     target=normalized_target,
+                                     host_type='ip',
+                                     source='nmap',
+                                     last_scanned_session_id=session_id)
+                    conn.commit()
                     all_results.append({
-                        'target': target,
+                        'target': normalized_target,
                         'type': 'ip',
                         'nmap': nmap_result
                     })
                 else:
                     # Очищаем target от протокола
-                    clean_target = target.replace("http://", "").replace("https://", "")
+                    clean_target = normalized_target.replace("http://", "").replace("https://", "")
                     url = f"http://{clean_target}"
+                    # Сохраняем сам домен в host
+                    resolved_ip = self.resolve_ip(clean_target)
+                    self.upsert_host(cursor,
+                                     hostname=clean_target,
+                                     ip_address=resolved_ip,
+                                     session_id=session_id,
+                                     target=normalized_target,
+                                     host_type='domain',
+                                     source='full_scan',
+                                     last_scanned_session_id=session_id)
+                    conn.commit()
                     
                     # 2. Извлечение контактов
-                    print("\n[CONTACTS] Извлечение контактов...")
+                    print(f"\n[{_ts()}] [CONTACTS] Извлечение контактов...")
+                    _contacts_t0 = time.perf_counter()
                     emails, phones = await self.extract_contacts(url)
-                    
-                    # 3. Wapiti сканирование
-                    print("\n[WAPITI] Запуск Wapiti...")
-                    wapiti_data = run_wapiti(target, temp_dir)
-                    if wapiti_data:
-                        process_wapiti_result(wapiti_data, cursor, session_id, target)
+                    print(f"[{_ts()}] [CONTACTS] Завершено за {time.perf_counter() - _contacts_t0:.2f}s")
+                    # Сохраняем контакты через AI-парсер (как Info находки)
+                    try:
+                        from db.vulnerability_manager import VulnerabilityManager
+                        contacts_payload = {
+                            'emails': emails,
+                            'phones': phones,
+                            'target': normalized_target
+                        }
+                        vuln_manager = VulnerabilityManager()
+                        vuln_manager.process_and_save_vulnerabilities(
+                            raw_data=contacts_payload,
+                            scanner_name='contacts',
+                            cursor=cursor,
+                            session_id=session_id,
+                            target_resource=normalized_target
+                        )
                         conn.commit()
+                    except Exception as _e:
+                        logger.warning(f"Не удалось сохранить контакты: {_e}")
                     
-                    # 4. Nuclei сканирование
-                    print("\n[NUCLEI] Запуск Nuclei...")
-                    nuclei_data = run_nuclei(target)
+                    # 3. WAPITI УДАЛЕН - был нестабильным
+                    # print(f"\n[{_ts()}] [WAPITI] Запуск Wapiti...")
+                    # _wapiti_t0 = time.perf_counter()
+                    # wapiti_data = run_wapiti(normalized_target, temp_dir)
+                    # if wapiti_data:
+                    #     process_wapiti_result(wapiti_data, cursor, session_id, normalized_target)
+                    #     conn.commit()
+                    # print(f"[{_ts()}] [WAPITI] Завершено за {time.perf_counter() - _wapiti_t0:.2f}s")
+                    
+                    # 3. Nuclei сканирование (было 4, но убрали Wapiti)
+                    print(f"\n[{_ts()}] [NUCLEI] Запуск Nuclei...")
+                    _nuclei_t0 = time.perf_counter()
+                    nuclei_data = run_nuclei(normalized_target)
                     if nuclei_data:
-                        process_nuclei_result(nuclei_data, cursor, session_id, target)
+                        process_nuclei_result(nuclei_data, cursor, session_id, normalized_target)
                         conn.commit()
+                    print(f"[{_ts()}] [NUCLEI] Завершено за {time.perf_counter() - _nuclei_t0:.2f}s")
                     
                     # 5. Subfinder сканирование
-                    print("\n[SUBFINDER] Запуск Subfinder...")
+                    print(f"\n[{_ts()}] [SUBFINDER] Запуск Subfinder...")
+                    _subfinder_t0 = time.perf_counter()
                     subfinder_result = self.run_subfinder(clean_target)
+                    # Сохраняем субдомены в host
+                    for sub in subfinder_result:
+                        sub_ip = self.resolve_ip(sub)
+                        self.upsert_host(cursor,
+                                         hostname=sub,
+                                         ip_address=sub_ip,
+                                         session_id=session_id,
+                                         target=normalized_target,
+                                         host_type='subdomain',
+                                         source='subfinder',
+                                         parent_domain=clean_target)
+                        self.upsert_subdomain(cursor,
+                                              name=sub,
+                                              parent_domain=clean_target,
+                                              session_id=session_id,
+                                              target=normalized_target,
+                                              source='subfinder')
+                    conn.commit()
+                    print(f"[{_ts()}] [SUBFINDER] Завершено за {time.perf_counter() - _subfinder_t0:.2f}s")
                     
                     # 6. Gobuster dir сканирование (если есть словарь)
                     gobuster_dir_result = ""
                     if dir_wordlist:
-                        print(f"\n[GOBUSTER DIR] Запуск Gobuster dir с {dir_wordlist}...")
+                        print(f"\n[{_ts()}] [GOBUSTER DIR] Запуск Gobuster dir с {dir_wordlist}...")
+                        _gobuster_dir_t0 = time.perf_counter()
                         gobuster_dir_result = self.run_gobuster_dir(clean_target, dir_wordlist)
-                        self.save_gobuster_findings(gobuster_dir_result, cursor, session_id, target)
+                        self.save_gobuster_findings(gobuster_dir_result, cursor, session_id, normalized_target)
                         conn.commit()
+                        print(f"[{_ts()}] [GOBUSTER DIR] Завершено за {time.perf_counter() - _gobuster_dir_t0:.2f}s")
                     
                     # 7. Gobuster fuzz сканирование (если есть словарь)
                     fuzz_results = []
                     if fuzz_wordlist and gobuster_dir_result:
-                        print(f"\n[GOBUSTER FUZZ] Поиск параметров для фаззинга...")
+                        print(f"\n[{_ts()}] [GOBUSTER FUZZ] Поиск параметров для фаззинга...")
+                        _gobuster_fuzz_t0 = time.perf_counter()
                         for line in gobuster_dir_result.splitlines():
                             if '?' in line and '=' in line:
                                 path = line.split()[0] if line.split() else line
                                 if '=' in path:
                                     param_path = path.split('=')[0] + '=FUZZ'
                                     fuzz_url = f"http://{clean_target}{param_path}"
-                                    print(f"  Фаззинг: {fuzz_url}")
+                                    print(f"[{_ts()}]   Фаззинг: {fuzz_url}")
                                     fuzz_output = self.run_gobuster_fuzz(fuzz_url, fuzz_wordlist)
                                     fuzz_results.append({
                                         'url': fuzz_url, 
                                         'result': fuzz_output, 
                                         'wordlist': fuzz_wordlist
                                     })
+                        print(f"[{_ts()}] [GOBUSTER FUZZ] Завершено за {time.perf_counter() - _gobuster_fuzz_t0:.2f}s")
                     
                     all_results.append({
-                        'target': clean_target,
+                        'target': normalized_target,
                         'type': 'domain',
                         'nmap': nmap_result,
                         'gobuster_dir': gobuster_dir_result,
@@ -427,10 +614,10 @@ class FullScanner:
                 ScanSession.update(cursor, session_id, end_time=datetime.now().isoformat(), status="completed")
                 conn.commit()
                 
-                print(f"\n[SUCCESS] Полное сканирование завершено успешно!")
+                print(f"\n[{_ts()}] [SUCCESS] Полное сканирование завершено успешно!")
                 
                 return {
-                    'original_target': target,
+                    'original_target': normalized_target,
                     'is_ip': is_ip,
                     'contacts': {
                         'emails': emails,
@@ -441,7 +628,7 @@ class FullScanner:
                 }
                 
             except Exception as e:
-                print(f"[ERROR] Ошибка во время сканирования: {e}")
+                print(f"[{_ts()}] [ERROR] Ошибка во время сканирования: {e}")
                 ScanSession.update(cursor, session_id, end_time=datetime.now().isoformat(), status="failed")
                 conn.commit()
                 raise
@@ -452,9 +639,9 @@ class FullScanner:
                 try:
                     import shutil
                     shutil.rmtree(temp_dir)
-                    print(f"[INFO] Временная директория очищена: {temp_dir}")
+                    print(f"[{_ts()}] [INFO] Временная директория очищена: {temp_dir}")
                 except Exception as e:
-                    print(f"[WARNING] Не удалось очистить временную директорию: {e}")
+                    print(f"[{_ts()}] [WARNING] Не удалось очистить временную директорию: {e}")
             
         except Exception as e:
             logger.error(f"Ошибка полного сканирования {target}: {e}")

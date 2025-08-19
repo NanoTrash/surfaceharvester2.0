@@ -41,7 +41,7 @@ def setup_logging(log_level=logging.INFO, log_file=None, enable_console=True):
     
     # Файловый обработчик
     if log_file is None:
-        log_file = f"pntst_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        log_file = f"surfaceharvester2.0_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     
     try:
         # Создаем директорию для логов если не существует
@@ -77,7 +77,7 @@ def setup_component_loggers():
     # Логгеры для сканеров
     scanner_loggers = [
         'scanner.nuclei',
-        'scanner.wapiti', 
+        # 'scanner.wapiti',  # УДАЛЕНО: Wapiti больше не используется 
         'scanner.nmap',
         'scanner.gobuster',
         'scanner.full_scanner'
@@ -140,4 +140,4 @@ def log_scan_metrics(scanner_name, target, duration, vulnerabilities_found, erro
 # Настройка логирования при импорте модуля
 if __name__ != "__main__":
     # Базовая настройка логирования при импорте
-    setup_logging(log_level=logging.INFO, log_file="logs/pntst.log")
+    setup_logging(log_level=logging.INFO, log_file="logs/surfaceharvester2.0.log")

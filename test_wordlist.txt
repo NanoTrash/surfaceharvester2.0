@@ -1,8 +1,0 @@
-admin
-login
-test
-index
-robots.txt
-sitemap.xml
-wp-admin
-phpinfo.php

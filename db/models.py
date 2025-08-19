@@ -160,12 +160,29 @@ class Host(BaseModel):
     id = "INTEGER PRIMARY KEY AUTOINCREMENT"
     hostname = "TEXT"
     ip_address = "TEXT"
+    session_id = "INTEGER"  # Сессия, в которой объект обнаружен
+    target = "TEXT"  # Исходная цель (URL/домен), относительно которой найден объект
+    type = "TEXT DEFAULT 'domain'"  # domain | subdomain | ip
+    source = "TEXT"  # инструмент-источник (subfinder, nmap, etc.)
+    parent_domain = "TEXT"  # корневой домен для субдоменов
+    last_scanned_session_id = "INTEGER"  # последняя сессия полного сканирования этого хоста
     created_at = "DATETIME DEFAULT CURRENT_TIMESTAMP"
 
 class Url(BaseModel):
     id = "INTEGER PRIMARY KEY AUTOINCREMENT"
     host_id = "INTEGER"
     url = "TEXT NOT NULL"
+    created_at = "DATETIME DEFAULT CURRENT_TIMESTAMP"
+
+class Subdomain(BaseModel):
+    id = "INTEGER PRIMARY KEY AUTOINCREMENT"
+    name = "TEXT NOT NULL"  # полное имя субдомена
+    parent_domain = "TEXT"  # корневой домен
+    host_id = "INTEGER"  # ссылка на host.id, если создан
+    session_first_seen = "INTEGER"  # id сессии, в которой впервые увидели
+    session_last_seen = "INTEGER"  # последняя сессия, где встречался
+    target = "TEXT"  # исходная цель запуска, если применимо
+    source = "TEXT"  # subfinder, nmap и т.п.
     created_at = "DATETIME DEFAULT CURRENT_TIMESTAMP"
 
 class CVE(BaseModel):
@@ -182,3 +199,43 @@ class ScanResult(BaseModel):
     status = "TEXT DEFAULT 'Found'"
     scanner = "TEXT"
     created_at = "DATETIME DEFAULT CURRENT_TIMESTAMP"
+
+
+# Модели для vulnx интеграции
+class Exploits(BaseModel):
+    id = "INTEGER PRIMARY KEY AUTOINCREMENT"
+    vulnerability_id = "INTEGER NOT NULL"
+    cve_id = "TEXT NOT NULL"
+    exploit_type = "TEXT NOT NULL"
+    source = "TEXT NOT NULL"
+    title = "TEXT"
+    description = "TEXT"
+    url = "TEXT"
+    file_path = "TEXT"
+    language = "TEXT"
+    severity_score = "INTEGER DEFAULT 0"
+    is_working = "BOOLEAN DEFAULT NULL"
+    metadata = "JSON"
+    created_at = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    updated_at = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+
+
+class CVECache(BaseModel):
+    id = "INTEGER PRIMARY KEY AUTOINCREMENT"
+    cve_id = "TEXT UNIQUE NOT NULL"
+    vulnx_response = "JSON"
+    exploits_found = "INTEGER DEFAULT 0"
+    last_checked = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    is_stale = "BOOLEAN DEFAULT 0"
+
+
+class CVEProcessing(BaseModel):
+    id = "INTEGER PRIMARY KEY AUTOINCREMENT"
+    vulnerability_id = "INTEGER NOT NULL"
+    cve_id = "TEXT NOT NULL"
+    status = "TEXT DEFAULT 'pending'"
+    vulnx_checked = "BOOLEAN DEFAULT 0"
+    nuclei_checked = "BOOLEAN DEFAULT 0"
+    exploits_downloaded = "BOOLEAN DEFAULT 0"
+    last_processed = "TIMESTAMP"
+    error_message = "TEXT"

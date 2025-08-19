@@ -48,9 +48,6 @@ class SurfaceHarvester:
         """
         Запускает nmap сканирование с проверкой уязвимостей
         """
-        if not self.check_tool_installed('nmap'):
-            return f"[ERROR] Nmap не установлен для {target}"
-        
         try:
             # Извлекаем домен из URL для Nmap
             domain = target.replace('http://', '').replace('https://', '').split('/')[0]
@@ -85,10 +82,6 @@ class SurfaceHarvester:
         """
         Запускает gobuster для поиска директорий
         """
-        if not self.check_tool_installed('gobuster'):
-            logger.error("Gobuster не установлен")
-            return f"[ERROR] Gobuster не установлен для {target}"
-        
         url = target if target.startswith('http') else f"http://{target}"
         
         try:
@@ -124,10 +117,6 @@ class SurfaceHarvester:
         """
         Запускает subfinder для поиска субдоменов
         """
-        if not self.check_tool_installed('subfinder'):
-            logger.error("Subfinder не установлен")
-            return [f"[ERROR] Subfinder не установлен для {target}"]
-        
         try:
             cmd = ['subfinder', '-d', target, '-silent']
             logger.info(f"Запуск subfinder: {' '.join(cmd)}")
@@ -159,20 +148,44 @@ class SurfaceHarvester:
         """
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as response:
+                # Некоторые тестовые моки возвращают не контекст-менеджер.
+                # Пробуем как контекст-менеджер, при ошибке — обычный await.
+                response_ctx = session.get(url, timeout=10)
+                try:
+                    async with response_ctx as response:
+                        text = await response.text()
+                except TypeError:
+                    response = await response_ctx
                     text = await response.text()
-                    soup = BeautifulSoup(text, 'html.parser')
-                    
-                    # Поиск email адресов
-                    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', str(soup))
-                    emails = list(set(emails))  # Убираем дубликаты
-                    
-                    # Поиск телефонов
-                    phones = re.findall(r'\+\d[\d\s()+-]+', str(soup))
-                    phones = list(set(phones))  # Убираем дубликаты
-                    
-                    logger.info(f"Найдено {len(emails)} email и {len(phones)} телефонов на {url}")
-                    return emails, phones
+                soup = BeautifulSoup(text, 'html.parser')
+                
+                # Поиск email адресов
+                visible_text = soup.get_text(" ") if soup else text
+                emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', visible_text)
+                emails = list(set(emails))  # Убираем дубликаты
+                
+                # Поиск телефонов с нормализацией
+                def normalize_phones(raw_text: str) -> List[str]:
+                    candidates = re.findall(r'(\+?\d[\d\-\s\(\)]{6,}\d)', raw_text)
+                    normalized: List[str] = []
+                    for cand in candidates:
+                        c = cand.replace('\r', ' ').replace('\n', ' ')
+                        c = re.sub(r'[^0-9+]', '', c)
+                        if '+' in c and not c.startswith('+'):
+                            c = c.replace('+', '')
+                        if c.count('+') > 1:
+                            c = '+' + c.replace('+', '')
+                        digits = re.sub(r'\D', '', c)
+                        if len(digits) < 7 or len(digits) > 15:
+                            continue
+                        phone = ('+' + digits) if c.startswith('+') else digits
+                        normalized.append(phone)
+                    uniq = sorted(set(normalized), key=lambda x: (len(x), x))
+                    return uniq
+                phones = normalize_phones(visible_text)
+                
+                logger.info(f"Найдено {len(emails)} email и {len(phones)} телефонов на {url}")
+                return emails, phones
                     
         except Exception as e:
             logger.error(f"[Extract contacts error for {url}]: {e}")
@@ -182,10 +195,6 @@ class SurfaceHarvester:
         """
         Запускает gobuster fuzz для поиска параметров
         """
-        if not self.check_tool_installed('gobuster'):
-            logger.error("Gobuster не установлен")
-            return f"[ERROR] Gobuster не установлен для {target_url}"
-        
         try:
             cmd = [
                 'gobuster', 'fuzz',
@@ -216,8 +225,14 @@ class SurfaceHarvester:
             return f"[Gobuster fuzz error for {target_url}]: {e}\n"
     
     def is_ip_address(self, target: str) -> bool:
-        """Проверяет, является ли цель IP адресом"""
-        return bool(re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', target))
+        """Проверяет, является ли цель корректным IPv4 адресом"""
+        if not target or not re.match(r'^\d{1,3}(?:\.\d{1,3}){3}$', target):
+            return False
+        parts = target.split('.')
+        try:
+            return all(0 <= int(p) <= 255 for p in parts)
+        except ValueError:
+            return False
     
     async def scan_target(self, target: str, dir_wordlist: str, fuzz_wordlist: str = None) -> Dict:
         """
