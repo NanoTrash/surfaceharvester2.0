@@ -325,20 +325,32 @@ export SURFH2_LOG_LEVEL=INFO
 
 ```
 surfaceharvester2.0/
-├── cli.py                 # Основной CLI интерфейс
-├── reports.py             # Быстрые отчеты
-├── reports_manager.py     # Расширенная система отчетов
-├── db/                    # Модули базы данных
-│   ├── models.py          # Модели данных
-│   ├── schema.py          # Схема БД
-│   └── report.py          # Функции отчетов
-├── scanner/               # Модули сканирования
-│   ├── full_scanner.py    # Полное сканирование
-│   ├── nuclei.py          # Nuclei интеграция
-│   ├── vulnx_processor.py # Vulnx интеграция
-│   └── ai_parser.py       # AI-парсинг
-├── scan_results.db        # База данных результатов
-└── wordlists/             # Словари для сканирования
+├── README.md              # 📖 Полная документация
+├── cli.py                 # 🖥️ Основной CLI интерфейс
+├── reports.py             # 📊 Быстрые отчеты
+├── reports_manager.py     # 📋 Расширенная система отчетов
+├── main.py                # 🚀 Альтернативная точка входа
+├── config.py              # ⚙️ Конфигурация
+├── config_logging.py      # 📝 Настройки логирования
+├── pyproject.toml         # 📦 Зависимости Poetry
+├── poetry.lock           # 🔒 Фиксированные версии
+├── db/                   # 🗄️ Модули базы данных
+│   ├── models.py         # 📋 Модели данных
+│   ├── schema.py         # 🗃️ Схема БД
+│   ├── report.py         # 📊 Функции отчетов
+│   └── vulnerability_manager.py
+├── scanner/              # 🔍 Модули сканирования
+│   ├── full_scanner.py   # 🔄 Полное сканирование
+│   ├── nuclei.py         # ⚡ Nuclei интеграция
+│   ├── vulnx_processor.py # 💥 Vulnx интеграция
+│   ├── ai_parser.py      # 🤖 AI-парсинг
+│   └── ...
+├── exploits/             # 💣 Папка для эксплойтов
+├── wordlists/            # 📝 Словари для сканирования
+│   ├── common.txt        # 📄 Общие директории
+│   ├── dir_wordlist.txt  # 📁 Директории
+│   └── LFI-Jhaddix.txt   # 🔍 LFI векторы
+└── scan_results.db       # 🗄️ База данных результатов
 ```
 
 ## 🚀 Примеры использования
