@@ -449,7 +449,8 @@ def show_vulnerabilities(db_file="scan_results.db", target=None, severity=None):
         if target:
             show_report(cursor, target)
         else:
-            show_summary(cursor)
+            from db.report import show_summary as db_show_summary
+            db_show_summary(cursor)
         
         conn.close()
     except Exception as e:
@@ -780,7 +781,11 @@ def main():
             return 0 if success else 1
         
         elif args.command == 'report':
-            show_vulnerabilities(args.db, args.target)
+            try:
+                show_vulnerabilities(args.db, args.target)
+            except Exception as e:
+                print(f"Ошибка при показе отчета: {e}")
+                return 1
             return 0
         
         elif args.command == 'summary':
