@@ -66,6 +66,23 @@ def create_indexes(cursor):
         "CREATE INDEX IF NOT EXISTS idx_scanresult_url_id ON scanresult(url_id)",
         "CREATE INDEX IF NOT EXISTS idx_scanresult_cve_id ON scanresult(cve_id)",
         "CREATE INDEX IF NOT EXISTS idx_scanresult_scanner ON scanresult(scanner)",
+        
+        # Индексы для vulnx таблиц
+        "CREATE INDEX IF NOT EXISTS idx_exploits_cve_id ON exploits(cve_id)",
+        "CREATE INDEX IF NOT EXISTS idx_exploits_vulnerability_id ON exploits(vulnerability_id)",
+        "CREATE INDEX IF NOT EXISTS idx_exploits_type ON exploits(exploit_type)",
+        "CREATE INDEX IF NOT EXISTS idx_exploits_source ON exploits(source)",
+        "CREATE INDEX IF NOT EXISTS idx_exploits_severity ON exploits(severity_score DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_exploits_language ON exploits(language)",
+        
+        "CREATE INDEX IF NOT EXISTS idx_cve_cache_cve_id ON cvecache(cve_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cve_cache_last_checked ON cvecache(last_checked)",
+        "CREATE INDEX IF NOT EXISTS idx_cve_cache_stale ON cvecache(is_stale)",
+        
+        "CREATE INDEX IF NOT EXISTS idx_cve_processing_vulnerability_id ON cveprocessing(vulnerability_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cve_processing_cve_id ON cveprocessing(cve_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cve_processing_status ON cveprocessing(status)",
+        "CREATE INDEX IF NOT EXISTS idx_cve_processing_last_processed ON cveprocessing(last_processed)",
     ]
     
     for index_sql in indexes:

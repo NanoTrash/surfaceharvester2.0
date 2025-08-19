@@ -199,3 +199,43 @@ class ScanResult(BaseModel):
     status = "TEXT DEFAULT 'Found'"
     scanner = "TEXT"
     created_at = "DATETIME DEFAULT CURRENT_TIMESTAMP"
+
+
+# Модели для vulnx интеграции
+class Exploits(BaseModel):
+    id = "INTEGER PRIMARY KEY AUTOINCREMENT"
+    vulnerability_id = "INTEGER NOT NULL"
+    cve_id = "TEXT NOT NULL"
+    exploit_type = "TEXT NOT NULL"
+    source = "TEXT NOT NULL"
+    title = "TEXT"
+    description = "TEXT"
+    url = "TEXT"
+    file_path = "TEXT"
+    language = "TEXT"
+    severity_score = "INTEGER DEFAULT 0"
+    is_working = "BOOLEAN DEFAULT NULL"
+    metadata = "JSON"
+    created_at = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    updated_at = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+
+
+class CVECache(BaseModel):
+    id = "INTEGER PRIMARY KEY AUTOINCREMENT"
+    cve_id = "TEXT UNIQUE NOT NULL"
+    vulnx_response = "JSON"
+    exploits_found = "INTEGER DEFAULT 0"
+    last_checked = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    is_stale = "BOOLEAN DEFAULT 0"
+
+
+class CVEProcessing(BaseModel):
+    id = "INTEGER PRIMARY KEY AUTOINCREMENT"
+    vulnerability_id = "INTEGER NOT NULL"
+    cve_id = "TEXT NOT NULL"
+    status = "TEXT DEFAULT 'pending'"
+    vulnx_checked = "BOOLEAN DEFAULT 0"
+    nuclei_checked = "BOOLEAN DEFAULT 0"
+    exploits_downloaded = "BOOLEAN DEFAULT 0"
+    last_processed = "TIMESTAMP"
+    error_message = "TEXT"

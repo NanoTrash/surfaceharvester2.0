@@ -502,6 +502,129 @@ def show_summary(db_file, target=None):
     return True
 
 
+def handle_exploits_command(args):
+    """Обработчик команд exploits"""
+    try:
+        # Динамический импорт для избежания ошибок если модули не установлены
+        from scanner.cve_monitor import CVEProcessor
+        import asyncio
+        import json
+        import time
+        
+        processor = CVEProcessor(args.db)
+        
+        if args.exploits_command == 'search':
+            # Поиск эксплойтов для pending уязвимостей
+            print("[INFO] Поиск эксплойтов для уязвимостей...")
+            
+            if args.target:
+                print(f"[INFO] Фильтр по цели: {args.target}")
+            
+            async def run_search():
+                result = await processor.process_all_pending(args.limit)
+                print(f"\n[SUCCESS] Обработано уязвимостей: {result['processed']}")
+                print(f"[SUCCESS] Найдено эксплойтов: {result['exploits_found']}")
+                return result
+            
+            result = asyncio.run(run_search())
+            return 0 if result['processed'] > 0 else 1
+        
+        elif args.exploits_command == 'monitor':
+            # Запуск мониторинга
+            print(f"[INFO] Запуск мониторинга CVE (интервал: {args.interval}s)")
+            
+            try:
+                processor.start_monitoring(args.interval)
+                
+                if args.daemon:
+                    print("[INFO] Мониторинг запущен в фоне. Для остановки используйте Ctrl+C")
+                    try:
+                        while True:
+                            time.sleep(60)
+                            status = processor.monitor.get_status()
+                            processed = sum(status.get('processing_stats', {}).values())
+                            exploits = status.get('exploit_stats', {}).get('total_exploits', 0)
+                            print(f"[STATUS] Обработано CVE: {processed}, Найдено эксплойтов: {exploits}")
+                    except KeyboardInterrupt:
+                        print("\n[INFO] Получен сигнал остановки")
+                else:
+                    print("[INFO] Мониторинг запущен. Нажмите Ctrl+C для остановки")
+                    try:
+                        while True:
+                            time.sleep(1)
+                    except KeyboardInterrupt:
+                        print("\n[INFO] Остановка мониторинга...")
+            finally:
+                processor.stop_monitoring()
+            
+            return 0
+        
+        elif args.exploits_command == 'status':
+            # Статус обработки
+            status = processor.monitor.get_status()
+            
+            print("=== Статус CVE обработки ===")
+            print(f"Мониторинг активен: {'✅' if status['running'] else '❌'}")
+            print(f"Последняя проверка: {status.get('last_check', 'Никогда')}")
+            print(f"Интервал: {status.get('check_interval', 'N/A')}s")
+            
+            print(f"\n📊 Статистика обработки:")
+            processing_stats = status.get('processing_stats', {})
+            for status_name, count in processing_stats.items():
+                emoji = {'completed': '✅', 'failed': '❌', 'processing': '⏳', 'pending': '⏸️'}.get(status_name, '📋')
+                print(f"  {emoji} {status_name}: {count}")
+            
+            print(f"\n🎯 Статистика эксплойтов:")
+            exploit_stats = status.get('exploit_stats', {})
+            print(f"  💥 Всего эксплойтов: {exploit_stats.get('total_exploits', 0)}")
+            print(f"  🔍 Уникальных CVE: {exploit_stats.get('unique_cves', 0)}")
+            print(f"  🎯 Уязвимых ресурсов: {exploit_stats.get('vulnerable_assets', 0)}")
+            
+            return 0
+        
+        elif args.exploits_command == 'report':
+            # Отчёт по эксплойтам
+            report = processor.get_exploit_report()
+            
+            if args.format == 'json':
+                print(json.dumps(report, ensure_ascii=False, indent=2))
+                return 0
+            
+            print("=== 📋 Отчёт по найденным эксплойтам ===")
+            
+            stats = report.get('stats', [])
+            if stats:
+                print(f"\n📊 Статистика по типам эксплойтов:")
+                for stat in stats[:10]:  # топ 10
+                    total, unique_cves, assets, exploit_type, source, language = stat
+                    print(f"  🔸 {exploit_type} ({source}, {language}): {total} эксплойтов")
+            
+            top_cves = report.get('top_cves', [])
+            if top_cves:
+                print(f"\n🎯 Топ CVE по количеству эксплойтов:")
+                for cve_stat in top_cves[:10]:
+                    cve_id, exploit_count, avg_severity = cve_stat
+                    severity_emoji = {'10.0': '🔴', '9': '🔴', '8': '🟠', '7': '🟠', '6': '🟡', '5': '🟡'}.get(str(int(avg_severity)), '🟢')
+                    print(f"  {severity_emoji} {cve_id}: {exploit_count} эксплойтов (severity: {avg_severity:.1f})")
+            
+            if not stats and not top_cves:
+                print("ℹ️  Эксплойты не найдены. Запустите 'exploits search' для поиска.")
+            
+            return 0
+        
+        else:
+            print(f"[ERROR] Неизвестная подкоманда exploits: {args.exploits_command}")
+            return 1
+    
+    except ImportError as e:
+        print(f"[ERROR] Не удалось импортировать модули vulnx: {e}")
+        print("[HINT] Убедитесь, что установлены зависимости: requests")
+        return 1
+    except Exception as e:
+        print(f"[ERROR] Ошибка выполнения команды exploits: {e}")
+        return 1
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Инструмент для автоматизированного сканирования уязвимостей и сбора информации о поверхности с использованием AI-парсинга результатов",
@@ -576,6 +699,33 @@ def main():
     targets_scan_parser.add_argument('--dir-wordlist', required=True, help='Путь к словарю для gobuster dir')
     targets_scan_parser.add_argument('--fuzz-wordlist', help='Путь к словарю для gobuster fuzz')
     targets_scan_parser.add_argument('--subdomains', action='store_true', help='Выбирать только субдомены')
+
+    # Команда exploits - поиск эксплойтов через vulnx
+    exploits_parser = subparsers.add_parser('exploits', help='Поиск эксплойтов для уязвимостей')
+    exploits_subparsers = exploits_parser.add_subparsers(dest='exploits_command', help='Команды для работы с эксплойтами')
+    
+    # Подкоманда search
+    exploits_search_parser = exploits_subparsers.add_parser('search', help='Поиск эксплойтов для pending уязвимостей')
+    exploits_search_parser.add_argument('--db', default='scan_results.db', help='Путь к базе данных')
+    exploits_search_parser.add_argument('--limit', type=int, default=50, help='Лимит обработки уязвимостей')
+    exploits_search_parser.add_argument('--target', help='Поиск только для конкретной цели')
+    
+    # Подкоманда monitor
+    exploits_monitor_parser = exploits_subparsers.add_parser('monitor', help='Мониторинг новых CVE')
+    exploits_monitor_parser.add_argument('--db', default='scan_results.db', help='Путь к базе данных')
+    exploits_monitor_parser.add_argument('--interval', type=int, default=60, help='Интервал проверки (секунды)')
+    exploits_monitor_parser.add_argument('--daemon', action='store_true', help='Запуск в фоне')
+    
+    # Подкоманда status
+    exploits_status_parser = exploits_subparsers.add_parser('status', help='Статус обработки CVE')
+    exploits_status_parser.add_argument('--db', default='scan_results.db', help='Путь к базе данных')
+    
+    # Подкоманда report
+    exploits_report_parser = exploits_subparsers.add_parser('report', help='Отчёт по найденным эксплойтам')
+    exploits_report_parser.add_argument('--db', default='scan_results.db', help='Путь к базе данных')
+    exploits_report_parser.add_argument('--target', help='Отчёт только для конкретной цели')
+    exploits_report_parser.add_argument('--cve', help='Отчёт только для конкретного CVE')
+    exploits_report_parser.add_argument('--format', choices=['table', 'json'], default='table', help='Формат вывода')
     
     args = parser.parse_args()
     
@@ -699,6 +849,9 @@ def main():
                 if not success:
                     print(f"[ERROR] Ошибка при сканировании {sub_target}")
             return 0
+
+        elif args.command == 'exploits':
+            return handle_exploits_command(args)
             
     except Exception as e:
         print(f"[ERROR] Неожиданная ошибка: {e}")
