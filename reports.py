@@ -18,7 +18,8 @@ def main():
         print("  python reports.py 3     # История сканирований")
         print("  python reports.py 4     # Хосты и субдомены")
         print("  python reports.py 5     # Оценка безопасности")
-        print("  python reports.py 6     # Все отчеты")
+        print("  python reports.py 6     # Эксплойты и CVE")
+        print("  python reports.py 7     # Все отчеты")
         print("  python reports.py i     # Интерактивный режим")
         print("  python reports.py all   # Все отчеты (по умолчанию)")
         return
@@ -39,6 +40,8 @@ def main():
         elif report_type == '5':
             manager.security_score_report()
         elif report_type == '6':
+            manager.exploits_and_cve_report()
+        elif report_type == '7':
             manager.show_all_reports()
         elif report_type == 'i':
             manager.interactive_menu()

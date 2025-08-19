@@ -145,6 +145,43 @@ def migrate_schema(cursor):
                 cursor.execute("ALTER TABLE vulnerability ADD COLUMN scanner TEXT")
             except Exception as e:
                 print(f"[WARNING] Не удалось добавить колонку vulnerability.scanner: {e}")
+
+        # vulnx таблицы: добавляем недостающие колонки
+        # exploits: metadata
+        exploits_cols = _table_columns(cursor, 'exploits')
+        if 'metadata' not in exploits_cols and exploits_cols:
+            try:
+                cursor.execute("ALTER TABLE exploits ADD COLUMN metadata TEXT")
+            except Exception as e:
+                print(f"[WARNING] Не удалось добавить колонку exploits.metadata: {e}")
+
+        # cvecache: vulnx_response, last_checked, is_stale
+        cvecache_cols = _table_columns(cursor, 'cvecache')
+        missing_cvecache_cols = {
+            'vulnx_response': "TEXT",
+            'last_checked': "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+            'is_stale': "BOOLEAN DEFAULT 0"
+        }
+        for col, ddl in missing_cvecache_cols.items():
+            if col not in cvecache_cols and cvecache_cols:
+                try:
+                    cursor.execute(f"ALTER TABLE cvecache ADD COLUMN {col} {ddl}")
+                except Exception as e:
+                    print(f"[WARNING] Не удалось добавить колонку cvecache.{col}: {e}")
+
+        # cveprocessing: vulnx_checked, last_processed
+        cveprocessing_cols = _table_columns(cursor, 'cveprocessing')
+        missing_cveprocessing_cols = {
+            'vulnx_checked': "BOOLEAN DEFAULT 0",
+            'last_processed': "TIMESTAMP"
+        }
+        for col, ddl in missing_cveprocessing_cols.items():
+            if col not in cveprocessing_cols and cveprocessing_cols:
+                try:
+                    cursor.execute(f"ALTER TABLE cveprocessing ADD COLUMN {col} {ddl}")
+                except Exception as e:
+                    print(f"[WARNING] Не удалось добавить колонку cveprocessing.{col}: {e}")
+
         # subdomain: если таблицы нет — создать
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='subdomain'")
         if cursor.fetchone() is None:

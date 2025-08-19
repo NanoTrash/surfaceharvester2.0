@@ -312,6 +312,111 @@ class ReportsManager:
         except Exception as e:
             print(f"❌ Ошибка: {e}")
     
+    def exploits_and_cve_report(self, target: Optional[str] = None):
+        """
+        Отчет 6: Эксплойты и CVE
+        """
+        self._print_separator("💥 ЭКСПЛОЙТЫ И CVE")
+        
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Статистика CVE
+            cursor.execute("SELECT COUNT(*) FROM cve")
+            total_cves = cursor.fetchone()[0]
+            
+            # Статистика эксплойтов
+            cursor.execute("SELECT COUNT(*) FROM exploits")
+            total_exploits = cursor.fetchone()[0]
+            
+            # Статистика кэша CVE
+            cursor.execute("SELECT COUNT(*) FROM cvecache")
+            total_cached = cursor.fetchone()[0]
+            
+            print(f"🔍 Всего CVE: {total_cves}")
+            print(f"💥 Всего эксплойтов: {total_exploits}")
+            print(f"📦 Кэшированных CVE: {total_cached}")
+            
+            if total_exploits > 0:
+                # Топ эксплойтов по типам
+                cursor.execute("""
+                    SELECT exploit_type, COUNT(*) as count 
+                    FROM exploits 
+                    GROUP BY exploit_type 
+                    ORDER BY count DESC 
+                    LIMIT 5
+                """)
+                
+                exploit_types = cursor.fetchall()
+                print(f"\n🎯 Топ типов эксплойтов:")
+                for exploit_type, count in exploit_types:
+                    print(f"   • {exploit_type}: {count}")
+                
+                # Топ CVE по количеству эксплойтов
+                cursor.execute("""
+                    SELECT cve_id, COUNT(*) as exploit_count 
+                    FROM exploits 
+                    GROUP BY cve_id 
+                    ORDER BY exploit_count DESC 
+                    LIMIT 10
+                """)
+                
+                top_cves = cursor.fetchall()
+                print(f"\n🔴 Топ CVE по эксплойтам:")
+                for cve_id, exploit_count in top_cves:
+                    print(f"   • {cve_id}: {exploit_count} эксплойтов")
+                
+                # Последние найденные эксплойты
+                cursor.execute("""
+                    SELECT e.cve_id, e.exploit_type, e.source, e.title, e.id
+                    FROM exploits e
+                    ORDER BY e.id DESC
+                    LIMIT 5
+                """)
+                
+                recent_exploits = cursor.fetchall()
+                print(f"\n🕒 Последние эксплойты:")
+                for cve_id, exploit_type, source, title, exploit_id in recent_exploits:
+                    title_short = title[:50] + "..." if title and len(title) > 50 else title or "Без названия"
+                    print(f"   • {cve_id} ({exploit_type}, {source}): {title_short}")
+            
+            # Статистика по языкам программирования
+            if total_exploits > 0:
+                cursor.execute("""
+                    SELECT language, COUNT(*) as count 
+                    FROM exploits 
+                    WHERE language IS NOT NULL AND language != ''
+                    GROUP BY language 
+                    ORDER BY count DESC 
+                    LIMIT 5
+                """)
+                
+                languages = cursor.fetchall()
+                if languages:
+                    print(f"\n💻 Языки программирования:")
+                    for language, count in languages:
+                        print(f"   • {language}: {count}")
+            
+            # Статистика по источникам
+            if total_exploits > 0:
+                cursor.execute("""
+                    SELECT source, COUNT(*) as count 
+                    FROM exploits 
+                    GROUP BY source 
+                    ORDER BY count DESC
+                """)
+                
+                sources = cursor.fetchall()
+                print(f"\n📚 Источники эксплойтов:")
+                for source, count in sources:
+                    print(f"   • {source}: {count}")
+            
+            conn.close()
+            
+        except Exception as e:
+            print(f"❌ Ошибка: {e}")
+    
     def security_score_report(self, target: Optional[str] = None):
         """
         Отчет 5: Оценка безопасности
@@ -400,7 +505,8 @@ class ReportsManager:
             ("Детальный анализ уязвимостей", self.detailed_vulnerabilities_report),
             ("История сканирований", self.scan_sessions_report),
             ("Хосты и субдомены", self.hosts_and_subdomains_report),
-            ("Оценка безопасности", self.security_score_report)
+            ("Оценка безопасности", self.security_score_report),
+            ("Эксплойты и CVE", self.exploits_and_cve_report)
         ]
         
         for title, report_func in reports:
@@ -425,7 +531,8 @@ class ReportsManager:
             print("3. 📊 История сканирований")
             print("4. 🌐 Хосты и субдомены")
             print("5. 🛡️ Оценка безопасности")
-            print("6. 📋 Все отчеты")
+            print("6. 💥 Эксплойты и CVE")
+            print("7. 📋 Все отчеты")
             print("0. 🚪 Выход")
             
             try:
@@ -445,9 +552,11 @@ class ReportsManager:
                 elif choice == '5':
                     self.security_score_report()
                 elif choice == '6':
+                    self.exploits_and_cve_report()
+                elif choice == '7':
                     self.show_all_reports()
                 else:
-                    print("❌ Неверный выбор. Попробуйте снова.")
+                    print("❌ Неверный выбор. Попробуйте снова (0-7).")
                     continue
                 
                 # Показываем команды vulnx после каждого отчета
@@ -466,8 +575,8 @@ def main():
     parser = argparse.ArgumentParser(description="Менеджер отчетов для результатов сканирования")
     parser.add_argument('--db', default='scan_results.db', help='Путь к базе данных')
     parser.add_argument('--target', help='Фильтр по цели')
-    parser.add_argument('--report', type=int, choices=[1,2,3,4,5,6], 
-                       help='Номер отчета (1-6, 6=все отчеты)')
+    parser.add_argument('--report', type=int, choices=[1,2,3,4,5,6,7], 
+                       help='Номер отчета (1-6, 7=все отчеты)')
     parser.add_argument('--interactive', '-i', action='store_true', 
                        help='Интерактивный режим')
     
@@ -485,7 +594,8 @@ def main():
                 3: manager.scan_sessions_report,
                 4: manager.hosts_and_subdomains_report,
                 5: manager.security_score_report,
-                6: manager.show_all_reports
+                6: manager.exploits_and_cve_report,
+                7: manager.show_all_reports
             }
             reports[args.report](args.target)
         else:
