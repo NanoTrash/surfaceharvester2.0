@@ -309,7 +309,7 @@ export SURFH2_DB_PATH=scan_results.db
 export SURFH2_LOG_LEVEL=INFO
 ```
 
-### Структура проекта
+### Структура проекта (в разработке)
 
 ```
 surfaceharvester2.0/
